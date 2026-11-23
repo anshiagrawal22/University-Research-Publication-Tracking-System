@@ -1,4 +1,4 @@
-# University Research Publication Portal
+# University Research Publication Tracking System
 
 Phase 2 of the research publication tracking project: a Spring Boot API and a React portal. H2 keeps the data in memory. Later phases can replace the database, add the review queue, and wrap the same folders in Jenkins and Docker.
 
