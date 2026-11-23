@@ -1,0 +1,15 @@
+{
+  "status": "ok",
+  "message-type": "work",
+  "message": {
+    "DOI": "10.5555/example.2024.001",
+    "title": ["River Sensors and Campus Flood Models"],
+    "author": [
+      {"given": "Mina", "family": "Rahman"},
+      {"given": "Owen", "family": "Clarke"},
+      {"name": "Campus Hydrology Group"}
+    ],
+    "container-title": ["Journal of Civic Hydrology"],
+    "issued": {"date-parts": [[2024, 5, 2]]}
+  }
+}
