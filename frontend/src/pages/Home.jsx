@@ -6,7 +6,7 @@ const CARDS = [
     to: '/submit',
     icon: BookOpen,
     title: 'Submit a publication',
-    text: 'Add a record by hand, or fetch the bibliographic details from a DOI.',
+    text: 'Add a record by hand, fetch details from a Crossref DOI, or import works from ORCID.',
   },
   {
     to: '/publications',

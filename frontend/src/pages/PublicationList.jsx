@@ -1,0 +1,476 @@
+import { useEffect, useState } from 'react';
+import { Pencil, Search, Trash2, X } from 'lucide-react';
+import {
+  deletePublication,
+  DEPARTMENTS,
+  fetchFilterOptions,
+  fetchPublications,
+  getErrorMessage,
+  updatePublication,
+  validatePublicationFields,
+} from '../services/publicationApi';
+import { useToast } from '../components/Toast';
+
+const STATUSES = [
+  { value: '', label: 'All statuses' },
+  { value: 'VERIFIED', label: 'Verified' },
+  { value: 'IN_REVIEW', label: 'In review' },
+  { value: 'REJECTED', label: 'Rejected' },
+];
+
+const STATUS_LABELS = {
+  VERIFIED: 'Verified',
+  IN_REVIEW: 'In review',
+  REJECTED: 'Rejected',
+};
+
+export default function PublicationList() {
+  const toast = useToast();
+  const [search, setSearch] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [department, setDepartment] = useState('');
+  const [faculty, setFaculty] = useState('');
+  const [year, setYear] = useState('');
+  const [status, setStatus] = useState('');
+  const [page, setPage] = useState(0);
+  const [reload, setReload] = useState(0);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const [filterOptions, setFilterOptions] = useState({
+    departments: DEPARTMENTS,
+    years: [],
+    faculties: [],
+  });
+
+  const [editing, setEditing] = useState(null);
+  const [editErrors, setEditErrors] = useState({});
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+
+  // Debounce free-text search to avoid querying the API on every keystroke.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [debounced, department, faculty, year, status]);
+
+  useEffect(() => {
+    let active = true;
+    fetchFilterOptions()
+      .then((options) => {
+        if (active) setFilterOptions(options);
+      })
+      .catch(() => {
+        // Keep default department options if filter metadata fails
+      });
+    return () => {
+      active = false;
+    };
+  }, [reload]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      setLoading(true);
+      setError('');
+      try {
+        const params = { page, size: 8 };
+        if (debounced) params.search = debounced;
+        if (department) params.department = department;
+        if (faculty) params.faculty = faculty;
+        if (year) params.year = year;
+        if (status) params.status = status;
+        setData(await fetchPublications(params, controller.signal));
+      } catch (err) {
+        if (err.code !== 'ERR_CANCELED') {
+          setError(getErrorMessage(err, 'The register could not be loaded.'));
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    load();
+    return () => controller.abort();
+  }, [debounced, department, faculty, year, status, page, reload]);
+
+  const rows = data?.content || [];
+  const total = data?.totalElements || 0;
+  const from = total === 0 ? 0 : page * (data?.size || 8) + 1;
+  const to = Math.min(total, (page + 1) * (data?.size || 8));
+  const hasFilters = Boolean(search || department || faculty || year || status);
+
+  function resetFilters() {
+    setSearch('');
+    setDebounced('');
+    setDepartment('');
+    setFaculty('');
+    setYear('');
+    setStatus('');
+  }
+
+  function startEdit(row) {
+    setConfirmDeleteId(null);
+    setEditErrors({});
+    setEditing({
+      id: row.id,
+      title: row.title || '',
+      authors: (row.authors || []).join(', '),
+      doi: row.doi || '',
+      year: row.year ? String(row.year) : '',
+      department: row.department || '',
+      journal: row.journal || '',
+      orcidId: row.orcidId || '',
+      status: row.status || 'VERIFIED',
+    });
+  }
+
+  async function submitEdit(event) {
+    event.preventDefault();
+    if (!editing) return;
+
+    const { errors: nextErrors, authors, doi, yearNum } = validatePublicationFields(editing);
+    setEditErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
+    setSavingEdit(true);
+    try {
+      await updatePublication(editing.id, {
+        title: editing.title.trim(),
+        authors,
+        doi: doi || null,
+        year: yearNum,
+        department: editing.department,
+        journal: editing.journal.trim() || null,
+        orcidId: editing.orcidId.trim() || null,
+        status: editing.status,
+      });
+      toast.push('success', 'Publication updated.');
+      setEditing(null);
+      setReload((current) => current + 1);
+    } catch (err) {
+      const resp = err?.response?.data;
+      if (resp?.fieldErrors?.length) {
+        const mapped = {};
+        resp.fieldErrors.forEach((item) => {
+          mapped[item.field] = item.message;
+        });
+        setEditErrors((current) => ({ ...current, ...mapped }));
+      }
+      toast.push('error', getErrorMessage(err, 'Could not update publication.'));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function confirmDelete(id) {
+    setDeletingId(id);
+    try {
+      await deletePublication(id);
+      toast.push('success', 'Publication removed from the register.');
+      setConfirmDeleteId(null);
+      setReload((current) => current + 1);
+    } catch (err) {
+      toast.push('error', getErrorMessage(err, 'Could not delete publication.'));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  return (
+    <div>
+      <p className="eyebrow">Register</p>
+      <h1>Publications</h1>
+      <p className="lede">Every submitted record is listed here, including those still in review or rejected.</p>
+
+      <div className="filter-bar pubs-filters">
+        <label className="search-field">
+          <span>Search</span>
+          <span className="search-input-wrap">
+            <Search size={16} strokeWidth={1.5} aria-hidden="true" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Title, author, or DOI"
+            />
+          </span>
+        </label>
+        <label>
+          <span>Department</span>
+          <select value={department} onChange={(event) => setDepartment(event.target.value)}>
+            <option value="">All departments</option>
+            {filterOptions.departments.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Faculty</span>
+          <select value={faculty} onChange={(event) => setFaculty(event.target.value)}>
+            <option value="">All faculty</option>
+            {filterOptions.faculties.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Year</span>
+          <select value={year} onChange={(event) => setYear(event.target.value)}>
+            <option value="">All years</option>
+            {filterOptions.years.map((item) => <option key={item} value={String(item)}>{item}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Status</span>
+          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+            {STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </label>
+        <div className="filter-reset">
+          <button type="button" className="button button-secondary" onClick={resetFilters} disabled={!hasFilters}>
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="banner banner-error" role="alert">
+          <p>{error}</p>
+          <button type="button" className="button button-secondary" onClick={() => setReload((current) => current + 1)}>Try again</button>
+        </div>
+      )}
+
+      <div className="table-card" aria-busy={loading}>
+        {loading && rows.length === 0 ? (
+          <div className="skeleton-stack">
+            <div className="skeleton skeleton-row" />
+            <div className="skeleton skeleton-row" />
+            <div className="skeleton skeleton-row" />
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="empty">
+            <h2>No publications match</h2>
+            <p>Try a broader search, or reset the active filters.</p>
+          </div>
+        ) : (
+          <table>
+            <caption className="sr-only">Publication register</caption>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Authors</th>
+                <th>Department</th>
+                <th>Year</th>
+                <th>Status</th>
+                <th className="actions-col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const statusKey = row.status || 'IN_REVIEW';
+                return (
+                  <tr key={row.id}>
+                    <td data-label="Title">
+                      <strong>{row.title}</strong>
+                      {row.journal && <span className="cell-sub">{row.journal}</span>}
+                      {row.doi && <span className="cell-sub">DOI {row.doi}</span>}
+                    </td>
+                    <td data-label="Authors">{row.authors.join(', ')}</td>
+                    <td data-label="Department"><span className="tag">{row.department}</span></td>
+                    <td data-label="Year">{row.year}</td>
+                    <td data-label="Status">
+                      <span className={`chip chip-${statusKey.toLowerCase()}`}>
+                        {STATUS_LABELS[statusKey] || statusKey}
+                      </span>
+                    </td>
+                    <td data-label="Actions" className="actions-cell">
+                      {confirmDeleteId === row.id ? (
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="button button-danger button-sm"
+                            disabled={deletingId === row.id}
+                            onClick={() => confirmDelete(row.id)}
+                          >
+                            {deletingId === row.id ? 'Deleting…' : 'Confirm'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary button-sm"
+                            disabled={deletingId === row.id}
+                            onClick={() => setConfirmDeleteId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={`Edit ${row.title}`}
+                            title="Edit"
+                            onClick={() => startEdit(row)}
+                          >
+                            <Pencil size={15} strokeWidth={1.6} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button icon-button-danger"
+                            aria-label={`Delete ${row.title}`}
+                            title="Delete"
+                            onClick={() => setConfirmDeleteId(row.id)}
+                          >
+                            <Trash2 size={15} strokeWidth={1.6} aria-hidden="true" />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="pager">
+        <p>{loading && !data ? 'Loading records' : total === 0 ? '0 records' : `${from}–${to} of ${total}`}</p>
+        <div>
+          <button type="button" className="button button-secondary" disabled={page === 0 || loading} onClick={() => setPage((current) => current - 1)}>
+            Previous
+          </button>
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={loading || !data || page + 1 >= data.totalPages}
+            onClick={() => setPage((current) => current + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+
+      {editing && (
+        <div className="modal-backdrop" role="presentation" onClick={() => !savingEdit && setEditing(null)}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-pub-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="edit-pub-title">Edit publication</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close dialog"
+                disabled={savingEdit}
+                onClick={() => setEditing(null)}
+              >
+                <X size={18} strokeWidth={1.6} />
+              </button>
+            </div>
+            <form className="modal-form" onSubmit={submitEdit} noValidate>
+              <label>
+                Title
+                <input
+                  value={editing.title}
+                  onChange={(event) => setEditing((curr) => ({ ...curr, title: event.target.value }))}
+                  aria-invalid={Boolean(editErrors.title)}
+                  maxLength={500}
+                />
+                {editErrors.title && <span className="field-error">{editErrors.title}</span>}
+              </label>
+              <label>
+                Authors
+                <input
+                  value={editing.authors}
+                  onChange={(event) => setEditing((curr) => ({ ...curr, authors: event.target.value }))}
+                  placeholder="Separate names with commas"
+                  aria-invalid={Boolean(editErrors.authors)}
+                />
+                {editErrors.authors && <span className="field-error">{editErrors.authors}</span>}
+              </label>
+              <div className="split">
+                <label>
+                  Year
+                  <input
+                    type="number"
+                    min="1900"
+                    max="2100"
+                    step="1"
+                    value={editing.year}
+                    onChange={(event) => setEditing((curr) => ({ ...curr, year: event.target.value }))}
+                    aria-invalid={Boolean(editErrors.year)}
+                  />
+                  {editErrors.year && <span className="field-error">{editErrors.year}</span>}
+                </label>
+                <label>
+                  Department
+                  <select
+                    value={editing.department}
+                    onChange={(event) => setEditing((curr) => ({ ...curr, department: event.target.value }))}
+                    aria-invalid={Boolean(editErrors.department)}
+                  >
+                    <option value="">Select a department</option>
+                    {filterOptions.departments.map((dept) => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                  {editErrors.department && <span className="field-error">{editErrors.department}</span>}
+                </label>
+              </div>
+              <div className="split">
+                <label>
+                  DOI
+                  <input
+                    value={editing.doi}
+                    onChange={(event) => setEditing((curr) => ({ ...curr, doi: event.target.value }))}
+                    aria-invalid={Boolean(editErrors.doi)}
+                  />
+                  {editErrors.doi && <span className="field-error">{editErrors.doi}</span>}
+                </label>
+                <label>
+                  Status
+                  <select
+                    value={editing.status}
+                    onChange={(event) => setEditing((curr) => ({ ...curr, status: event.target.value }))}
+                  >
+                    {STATUSES.filter((item) => item.value).map((item) => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <label>
+                Journal
+                <input
+                  value={editing.journal}
+                  onChange={(event) => setEditing((curr) => ({ ...curr, journal: event.target.value }))}
+                  maxLength={300}
+                />
+              </label>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={savingEdit}
+                  onClick={() => setEditing(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button button-primary" disabled={savingEdit}>
+                  {savingEdit ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
