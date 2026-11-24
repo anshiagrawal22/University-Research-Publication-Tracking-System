@@ -4,6 +4,7 @@ import edu.university.portal.dto.FieldErrorItem;
 import edu.university.portal.dto.PublicationRequest;
 import edu.university.portal.exception.DuplicateDoiException;
 import edu.university.portal.exception.ValidationException;
+import edu.university.portal.model.Publication;
 import edu.university.portal.model.PublicationSource;
 import edu.university.portal.repository.PublicationRepository;
 import org.springframework.stereotype.Service;
@@ -11,12 +12,22 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 @Service
 public class ValidationService {
 
     private static final int MIN_YEAR = 1900;
     private static final int MAX_YEAR = 2100;
+    private static final Pattern DOI_PATTERN = Pattern.compile("^10\\.\\d{4,9}/\\S+$");
+    private static final Pattern ORCID_PATTERN = Pattern.compile("^\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]$");
+    private static final String[] DOI_PREFIXES = {
+            "https://dx.doi.org/",
+            "http://dx.doi.org/",
+            "https://doi.org/",
+            "http://doi.org/",
+            "doi:"
+    };
 
     private final PublicationRepository publications;
 
@@ -24,7 +35,8 @@ public class ValidationService {
         this.publications = publications;
     }
 
-    public NormalizedPublication validateCreate(PublicationRequest request) {
+    // Validate required publication fields, DOI format, and duplicate DOIs before saving.
+    public void validateAndApply(PublicationRequest request, Publication target, Long excludeId) {
         List<FieldErrorItem> errors = new ArrayList<>();
         PublicationRequest incoming = request == null
                 ? new PublicationRequest(null, null, null, null, null, null, null, null)
@@ -58,8 +70,8 @@ public class ValidationService {
             errors.add(new FieldErrorItem("department", "Department must be 160 characters or fewer"));
         }
 
-        String doi = DoiNormalizer.clean(incoming.doi());
-        if (doi != null && !DoiNormalizer.isValid(doi)) {
+        String doi = cleanDoi(incoming.doi());
+        if (doi != null && !isValidDoi(doi)) {
             errors.add(new FieldErrorItem("doi", "DOI must look like 10.xxxx/suffix"));
         }
 
@@ -68,36 +80,81 @@ public class ValidationService {
             errors.add(new FieldErrorItem("journal", "Journal must be 300 characters or fewer"));
         }
 
-        String orcidId = normalizeOrcid(incoming.orcidId());
-        if (orcidId != null && !orcidId.matches("\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]")) {
-            errors.add(new FieldErrorItem("orcidId", "ORCID iD must look like 0000-0000-0000-0000"));
+        String orcidId = trimToNull(incoming.orcidId());
+        if (orcidId != null) {
+            orcidId = orcidId.toUpperCase(Locale.ROOT);
+            if (!ORCID_PATTERN.matcher(orcidId).matches()) {
+                errors.add(new FieldErrorItem("orcidId", "ORCID iD must look like 0000-0000-0000-0000"));
+            }
         }
 
         if (!errors.isEmpty()) {
             throw new ValidationException(errors);
         }
 
-        if (doi != null && publications.existsByDoiIgnoreCase(doi)) {
-            throw new DuplicateDoiException(doi);
+        // Prevent duplicate publications using normalized DOI.
+        if (doi != null) {
+            boolean duplicate = excludeId == null
+                    ? publications.existsByDoiIgnoreCase(doi)
+                    : publications.existsByDoiIgnoreCaseAndIdNot(doi, excludeId);
+            if (duplicate) {
+                throw new DuplicateDoiException(doi);
+            }
         }
 
-        PublicationSource source = incoming.source() == null ? PublicationSource.FORM : incoming.source();
-        return new NormalizedPublication(title, authors, doi, year, department, journal, orcidId, source);
+        target.setTitle(title);
+        target.setAuthors(new ArrayList<>(authors));
+        target.setDoi(doi);
+        target.setYear(year);
+        target.setDepartment(department);
+        target.setJournal(journal);
+        target.setOrcidId(orcidId);
+        if (target.getSource() == null) {
+            target.setSource(incoming.source() == null ? PublicationSource.FORM : incoming.source());
+        }
+    }
+
+    public static String cleanDoi(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String doi = raw.trim().toLowerCase(Locale.ROOT);
+        if (doi.isEmpty()) {
+            return null;
+        }
+        boolean stripped = true;
+        while (stripped) {
+            stripped = false;
+            for (String prefix : DOI_PREFIXES) {
+                if (doi.startsWith(prefix)) {
+                    doi = doi.substring(prefix.length()).trim();
+                    stripped = true;
+                    break;
+                }
+            }
+        }
+        while (doi.endsWith("/")) {
+            doi = doi.substring(0, doi.length() - 1).trim();
+        }
+        return doi.isEmpty() ? null : doi;
+    }
+
+    public static boolean isValidDoi(String cleanedDoi) {
+        return cleanedDoi != null && DOI_PATTERN.matcher(cleanedDoi).matches();
     }
 
     private List<String> normalizeAuthors(List<String> authors) {
         if (authors == null) {
             return List.of();
         }
-        return authors.stream()
-                .map(this::trimToNull)
-                .filter(name -> name != null)
-                .toList();
-    }
-
-    private String normalizeOrcid(String orcidId) {
-        String value = trimToNull(orcidId);
-        return value == null ? null : value.toUpperCase(Locale.ROOT);
+        List<String> cleaned = new ArrayList<>();
+        for (String name : authors) {
+            String trimmed = trimToNull(name);
+            if (trimmed != null) {
+                cleaned.add(trimmed);
+            }
+        }
+        return cleaned;
     }
 
     private String trimToNull(String value) {

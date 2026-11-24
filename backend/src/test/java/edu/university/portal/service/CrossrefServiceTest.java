@@ -2,8 +2,7 @@ package edu.university.portal.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.university.portal.dto.CrossrefWork;
-import edu.university.portal.exception.CrossrefNotFoundException;
-import edu.university.portal.exception.CrossrefUnavailableException;
+import edu.university.portal.exception.ExternalApiException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -23,16 +22,16 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
-class CrossrefClientTest {
+class CrossrefServiceTest {
 
     private MockRestServiceServer server;
-    private CrossrefClient client;
+    private CrossrefService service;
 
     @BeforeEach
     void setUp() {
         RestTemplate restTemplate = new RestTemplate();
         server = MockRestServiceServer.createServer(restTemplate);
-        client = new CrossrefClient(restTemplate, new CrossrefMapper(new ObjectMapper()));
+        service = new CrossrefService(restTemplate, new ObjectMapper());
     }
 
     @Test
@@ -40,7 +39,7 @@ class CrossrefClientTest {
         server.expect(requestTo(containsString("api.crossref.org/works/")))
                 .andRespond(withSuccess(fixture("/crossref/work-ok.json"), MediaType.APPLICATION_JSON));
 
-        CrossrefWork work = client.lookup("https://doi.org/10.5555/example.2024.001");
+        CrossrefWork work = service.fetchByDoi("https://doi.org/10.5555/example.2024.001");
 
         assertThat(work.title()).isEqualTo("River Sensors and Campus Flood Models");
         assertThat(work.authors()).containsExactly("Mina Rahman", "Owen Clarke", "Campus Hydrology Group");
@@ -55,7 +54,7 @@ class CrossrefClientTest {
         server.expect(requestTo(containsString("api.crossref.org/works/")))
                 .andRespond(withSuccess(fixture("/crossref/work-missing-fields.json"), MediaType.APPLICATION_JSON));
 
-        CrossrefWork work = client.lookup("10.5555/partial");
+        CrossrefWork work = service.fetchByDoi("10.5555/partial");
 
         assertThat(work.title()).isNull();
         assertThat(work.journal()).isNull();
@@ -69,8 +68,8 @@ class CrossrefClientTest {
         server.expect(requestTo(containsString("api.crossref.org/works/")))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
 
-        assertThatThrownBy(() -> client.lookup("10.5555/missing.work"))
-                .isInstanceOf(CrossrefNotFoundException.class)
+        assertThatThrownBy(() -> service.fetchByDoi("10.5555/missing.work"))
+                .isInstanceOf(ExternalApiException.class)
                 .hasMessageContaining("10.5555/missing.work");
     }
 
@@ -79,8 +78,8 @@ class CrossrefClientTest {
         server.expect(requestTo(containsString("api.crossref.org/works/")))
                 .andRespond(withException(new SocketTimeoutException("Read timed out")));
 
-        assertThatThrownBy(() -> client.lookup("10.5555/slow.work"))
-                .isInstanceOf(CrossrefUnavailableException.class)
+        assertThatThrownBy(() -> service.fetchByDoi("10.5555/slow.work"))
+                .isInstanceOf(ExternalApiException.class)
                 .hasMessageContaining("did not respond");
     }
 

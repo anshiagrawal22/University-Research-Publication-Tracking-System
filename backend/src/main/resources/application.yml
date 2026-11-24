@@ -1,4 +1,4 @@
-# H2 is in-memory for Phase 2. Phase 3 should replace the datasource only.
+# File-backed H2 persists records across restarts without requiring external DB setup.
 # Entities and repositories use standard JPA — no vendor-specific SQL.
 server:
   port: 8080
@@ -13,14 +13,14 @@ spring:
   profiles:
     active: dev
   datasource:
-    url: jdbc:h2:mem:publications;DB_CLOSE_DELAY=-1
+    url: ${DB_URL:jdbc:h2:file:./data/publications;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE}
     driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: ${JPA_DDL_AUTO:update}
     properties:
       hibernate:
         jdbc:
@@ -40,3 +40,11 @@ app:
   crossref:
     connect-timeout: 3s
     read-timeout: 5s
+  orcid:
+    base-url: ${ORCID_API_BASE_URL:https://pub.orcid.org/v3.0}
+    token-url: ${ORCID_OAUTH_TOKEN_URL:https://orcid.org/oauth/token}
+    client-id: ${ORCID_CLIENT_ID:}
+    client-secret: ${ORCID_CLIENT_SECRET:}
+    connect-timeout: 4s
+    read-timeout: 8s
+    max-crossref-enrichments: 20

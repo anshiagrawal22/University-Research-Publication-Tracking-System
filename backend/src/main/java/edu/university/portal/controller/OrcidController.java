@@ -1,9 +1,9 @@
-package edu.university.portal.web;
+package edu.university.portal.controller;
 
 import edu.university.portal.dto.FieldErrorItem;
 import edu.university.portal.dto.OrcidWork;
 import edu.university.portal.exception.ValidationException;
-import edu.university.portal.service.OrcidWorksService;
+import edu.university.portal.service.OrcidService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,10 +18,10 @@ public class OrcidController {
 
     private static final String ORCID_PATTERN = "\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]";
 
-    private final OrcidWorksService orcidWorksService;
+    private final OrcidService orcidService;
 
-    public OrcidController(OrcidWorksService orcidWorksService) {
-        this.orcidWorksService = orcidWorksService;
+    public OrcidController(OrcidService orcidService) {
+        this.orcidService = orcidService;
     }
 
     @GetMapping("/{orcidId}/works")
@@ -32,6 +32,6 @@ public class OrcidController {
                     new FieldErrorItem("orcidId", "ORCID iD must look like 0000-0000-0000-0000")
             ));
         }
-        return orcidWorksService.findWorks(normalized);
+        return orcidService.fetchWorks(normalized);
     }
 }

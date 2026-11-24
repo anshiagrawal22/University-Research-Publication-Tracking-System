@@ -3,8 +3,10 @@ package edu.university.portal.service;
 import edu.university.portal.dto.DashboardSummary;
 import edu.university.portal.dto.DepartmentCount;
 import edu.university.portal.dto.FacultyCount;
+import edu.university.portal.dto.FieldErrorItem;
 import edu.university.portal.dto.PublicationResponse;
 import edu.university.portal.dto.YearCount;
+import edu.university.portal.exception.ValidationException;
 import edu.university.portal.repository.PublicationRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -26,69 +28,96 @@ public class DashboardService {
         this.publications = publications;
     }
 
+    // Retrieve verified publications and summary totals for the dashboard.
     @Transactional(readOnly = true)
-    public DashboardSummary summary(String department, Integer fromYear, Integer toYear) {
-        DashboardFilter filter = DashboardFilter.of(department, fromYear, toYear);
+    public DashboardSummary summary(String department, String faculty, Integer fromYear, Integer toYear) {
+        validateYearRange(fromYear, toYear);
+        String dept = trimOrEmpty(department);
+        String fac = trimOrEmpty(faculty);
+        int from = fromYear == null ? 0 : fromYear;
+        int to = toYear == null ? 0 : toYear;
+
         int currentYear = Year.now(ZoneOffset.UTC).getValue();
-        long thisYear = filter.includes(currentYear)
-                ? publications.countVerified(filter.applyDepartment(), filter.department(), true, currentYear, true, currentYear)
+        boolean includesCurrentYear = (fromYear == null || currentYear >= fromYear) && (toYear == null || currentYear <= toYear);
+        long thisYear = includesCurrentYear
+                ? publications.countVerified(!dept.isEmpty(), dept, !fac.isEmpty(), fac, true, currentYear, true, currentYear)
                 : 0L;
+
         return new DashboardSummary(
-                publications.countVerified(filter.applyDepartment(), filter.department(), filter.applyFrom(), filter.fromYear(), filter.applyTo(), filter.toYear()),
-                publications.countVerifiedDepartments(filter.applyDepartment(), filter.department(), filter.applyFrom(), filter.fromYear(), filter.applyTo(), filter.toYear()),
-                publications.countVerifiedAuthors(filter.applyDepartment(), filter.department(), filter.applyFrom(), filter.fromYear(), filter.applyTo(), filter.toYear()),
+                publications.countVerified(!dept.isEmpty(), dept, !fac.isEmpty(), fac, fromYear != null, from, toYear != null, to),
+                publications.countVerifiedDepartments(!dept.isEmpty(), dept, !fac.isEmpty(), fac, fromYear != null, from, toYear != null, to),
+                publications.countVerifiedAuthors(!dept.isEmpty(), dept, !fac.isEmpty(), fac, fromYear != null, from, toYear != null, to),
                 thisYear
         );
     }
 
     @Transactional(readOnly = true)
-    public List<DepartmentCount> byDepartment(String department, Integer fromYear, Integer toYear) {
-        DashboardFilter filter = DashboardFilter.of(department, fromYear, toYear);
+    public List<DepartmentCount> byDepartment(String department, String faculty, Integer fromYear, Integer toYear) {
+        validateYearRange(fromYear, toYear);
+        String dept = trimOrEmpty(department);
+        String fac = trimOrEmpty(faculty);
         return publications.countVerifiedByDepartment(
-                        filter.applyDepartment(), filter.department(), filter.applyFrom(), filter.fromYear(), filter.applyTo(), filter.toYear())
+                        !dept.isEmpty(), dept, !fac.isEmpty(), fac,
+                        fromYear != null, fromYear == null ? 0 : fromYear,
+                        toYear != null, toYear == null ? 0 : toYear)
                 .stream()
-                .map(row -> new DepartmentCount((String) row[0], asLong(row[1])))
+                .map(row -> new DepartmentCount((String) row[0], ((Number) row[1]).longValue()))
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<YearCount> byYear(String department, Integer fromYear, Integer toYear) {
-        DashboardFilter filter = DashboardFilter.of(department, fromYear, toYear);
+    public List<YearCount> byYear(String department, String faculty, Integer fromYear, Integer toYear) {
+        validateYearRange(fromYear, toYear);
+        String dept = trimOrEmpty(department);
+        String fac = trimOrEmpty(faculty);
         return publications.countVerifiedByYear(
-                        filter.applyDepartment(), filter.department(), filter.applyFrom(), filter.fromYear(), filter.applyTo(), filter.toYear())
+                        !dept.isEmpty(), dept, !fac.isEmpty(), fac,
+                        fromYear != null, fromYear == null ? 0 : fromYear,
+                        toYear != null, toYear == null ? 0 : toYear)
                 .stream()
-                .map(row -> new YearCount(((Number) row[0]).intValue(), asLong(row[1])))
+                .map(row -> new YearCount(((Number) row[0]).intValue(), ((Number) row[1]).longValue()))
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<FacultyCount> byFaculty(String department, Integer fromYear, Integer toYear) {
-        DashboardFilter filter = DashboardFilter.of(department, fromYear, toYear);
+    public List<FacultyCount> byFaculty(String department, String faculty, Integer fromYear, Integer toYear) {
+        validateYearRange(fromYear, toYear);
+        String dept = trimOrEmpty(department);
+        String fac = trimOrEmpty(faculty);
         return publications.countVerifiedByAuthor(
-                        filter.applyDepartment(), filter.department(), filter.applyFrom(), filter.fromYear(), filter.applyTo(), filter.toYear())
+                        !dept.isEmpty(), dept, !fac.isEmpty(), fac,
+                        fromYear != null, fromYear == null ? 0 : fromYear,
+                        toYear != null, toYear == null ? 0 : toYear)
                 .stream()
                 .limit(TOP_FACULTY)
-                .map(row -> new FacultyCount((String) row[0], asLong(row[1])))
+                .map(row -> new FacultyCount((String) row[0], ((Number) row[1]).longValue()))
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<PublicationResponse> recent(String department, Integer fromYear, Integer toYear) {
-        DashboardFilter filter = DashboardFilter.of(department, fromYear, toYear);
+    public List<PublicationResponse> recent(String department, String faculty, Integer fromYear, Integer toYear) {
+        validateYearRange(fromYear, toYear);
+        String dept = trimOrEmpty(department);
+        String fac = trimOrEmpty(faculty);
         return publications.findRecentVerified(
-                        filter.applyDepartment(),
-                        filter.department(),
-                        filter.applyFrom(),
-                        filter.fromYear(),
-                        filter.applyTo(),
-                        filter.toYear(),
+                        !dept.isEmpty(), dept, !fac.isEmpty(), fac,
+                        fromYear != null, fromYear == null ? 0 : fromYear,
+                        toYear != null, toYear == null ? 0 : toYear,
                         PageRequest.of(0, RECENT_LIMIT))
                 .stream()
                 .map(PublicationResponse::from)
                 .toList();
     }
 
-    private long asLong(Object value) {
-        return ((Number) value).longValue();
+    private void validateYearRange(Integer fromYear, Integer toYear) {
+        if (fromYear != null && toYear != null && fromYear > toYear) {
+            throw new ValidationException(List.of(
+                    new FieldErrorItem("fromYear", "From year cannot be later than to year")
+            ));
+        }
+    }
+
+    private String trimOrEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 }

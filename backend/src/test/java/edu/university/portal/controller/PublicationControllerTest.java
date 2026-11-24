@@ -1,7 +1,8 @@
-package edu.university.portal.web;
+package edu.university.portal.controller;
 
 import edu.university.portal.dto.FieldErrorItem;
 import edu.university.portal.dto.PageResponse;
+import edu.university.portal.dto.PublicationFiltersResponse;
 import edu.university.portal.dto.PublicationResponse;
 import edu.university.portal.exception.DuplicateDoiException;
 import edu.university.portal.exception.GlobalExceptionHandler;
@@ -22,9 +23,13 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -104,6 +109,7 @@ class PublicationControllerTest {
         when(publicationService.list(
                 eq("quantum"),
                 eq("Physics"),
+                isNull(),
                 eq(2022),
                 eq("Nature"),
                 eq(PublicationStatus.VERIFIED),
@@ -124,6 +130,40 @@ class PublicationControllerTest {
                 .andExpect(jsonPath("$.size").value(5))
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].department").value("Biology"));
+    }
+
+    @Test
+    void filtersUpdateAndDeleteEndpointsWork() throws Exception {
+        when(publicationService.filters()).thenReturn(
+                new PublicationFiltersResponse(List.of("Biology"), List.of(2024), List.of("Mina Rahman"))
+        );
+        when(publicationService.update(eq(7L), org.mockito.ArgumentMatchers.any())).thenReturn(sample());
+
+        mockMvc.perform(get("/api/publications/filters"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.departments[0]").value("Biology"))
+                .andExpect(jsonPath("$.years[0]").value(2024))
+                .andExpect(jsonPath("$.faculties[0]").value("Mina Rahman"));
+
+        mockMvc.perform(put("/api/publications/7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title": "River Sensors and Campus Flood Models",
+                                  "authors": ["Mina Rahman"],
+                                  "doi": "10.5555/example.2024.001",
+                                  "year": 2024,
+                                  "department": "Biology",
+                                  "journal": "Journal of Civic Hydrology",
+                                  "status": "VERIFIED"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(7));
+
+        mockMvc.perform(delete("/api/publications/7"))
+                .andExpect(status().isNoContent());
+        verify(publicationService).delete(7L);
     }
 
     private PublicationResponse sample() {

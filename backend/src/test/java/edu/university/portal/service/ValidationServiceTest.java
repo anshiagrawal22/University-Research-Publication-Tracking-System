@@ -4,6 +4,7 @@ import edu.university.portal.dto.FieldErrorItem;
 import edu.university.portal.dto.PublicationRequest;
 import edu.university.portal.exception.DuplicateDoiException;
 import edu.university.portal.exception.ValidationException;
+import edu.university.portal.model.Publication;
 import edu.university.portal.model.PublicationSource;
 import edu.university.portal.repository.PublicationRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,8 +35,9 @@ class ValidationServiceTest {
     @Test
     void missingRequiredFieldsAreReportedTogether() {
         PublicationRequest request = new PublicationRequest("  ", List.of("  "), null, null, " ", null, null, null);
+        Publication target = new Publication();
 
-        assertThatThrownBy(() -> validationService.validateCreate(request))
+        assertThatThrownBy(() -> validationService.validateAndApply(request, target, null))
                 .isInstanceOf(ValidationException.class)
                 .extracting(ex -> ((ValidationException) ex).getFieldErrors().stream().map(FieldErrorItem::field).toList())
                 .asList()
@@ -44,7 +46,8 @@ class ValidationServiceTest {
 
     @Test
     void rejectsMalformedDoi() {
-        assertThatThrownBy(() -> validationService.validateCreate(valid("10.12/too-short")))
+        Publication target = new Publication();
+        assertThatThrownBy(() -> validationService.validateAndApply(valid("10.12/too-short"), target, null))
                 .isInstanceOf(ValidationException.class)
                 .extracting(ex -> ((ValidationException) ex).getFieldErrors().get(0).field())
                 .isEqualTo("doi");
@@ -53,8 +56,9 @@ class ValidationServiceTest {
     @Test
     void duplicateDoiConflicts() {
         when(publications.existsByDoiIgnoreCase("10.5555/abc")).thenReturn(true);
+        Publication target = new Publication();
 
-        assertThatThrownBy(() -> validationService.validateCreate(valid("https://doi.org/10.5555/ABC")))
+        assertThatThrownBy(() -> validationService.validateAndApply(valid("https://doi.org/10.5555/ABC"), target, null))
                 .isInstanceOf(DuplicateDoiException.class)
                 .hasMessageContaining("already exists");
     }
@@ -62,25 +66,25 @@ class ValidationServiceTest {
     @Test
     void cleansDoiBeforeStorage() {
         when(publications.existsByDoiIgnoreCase("10.5555/abc")).thenReturn(false);
+        Publication target = new Publication();
 
-        NormalizedPublication normalized = validationService.validateCreate(
-                valid("  HTTPS://DOI.ORG/10.5555/AbC  ")
-        );
+        validationService.validateAndApply(valid("  HTTPS://DOI.ORG/10.5555/AbC  "), target, null);
 
-        assertThat(normalized.doi()).isEqualTo("10.5555/abc");
-        assertThat(normalized.source()).isEqualTo(PublicationSource.FORM);
-        assertThat(normalized.authors()).containsExactly("Ada Lovelace");
+        assertThat(target.getDoi()).isEqualTo("10.5555/abc");
+        assertThat(target.getSource()).isEqualTo(PublicationSource.FORM);
+        assertThat(target.getAuthors()).containsExactly("Ada Lovelace");
     }
 
     @Test
     void stripsDxDoiPrefixAndBlankDoiIsOptional() {
-        assertThat(DoiNormalizer.clean("http://dx.doi.org/10.12345/XYZ/")).isEqualTo("10.12345/xyz");
-        assertThat(DoiNormalizer.clean("   ")).isNull();
-        assertThat(DoiNormalizer.isValid("10.123456789/ok")).isTrue();
-        assertThat(DoiNormalizer.isValid("10.1234567890/no")).isFalse();
+        assertThat(ValidationService.cleanDoi("http://dx.doi.org/10.12345/XYZ/")).isEqualTo("10.12345/xyz");
+        assertThat(ValidationService.cleanDoi("   ")).isNull();
+        assertThat(ValidationService.isValidDoi("10.123456789/ok")).isTrue();
+        assertThat(ValidationService.isValidDoi("10.1234567890/no")).isFalse();
 
-        NormalizedPublication normalized = validationService.validateCreate(valid(null));
-        assertThat(normalized.doi()).isNull();
+        Publication target = new Publication();
+        validationService.validateAndApply(valid(null), target, null);
+        assertThat(target.getDoi()).isNull();
     }
 
     private PublicationRequest valid(String doi) {

@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DataJpaTest
 @Import(DashboardService.class)
 @ActiveProfiles("test")
-class DashboardAggregationTest {
+class DashboardServiceTest {
 
     @Autowired
     private PublicationRepository publications;
@@ -50,7 +50,7 @@ class DashboardAggregationTest {
 
     @Test
     void summaryCountsOnlyVerifiedRecords() {
-        DashboardSummary summary = dashboardService.summary(null, null, null);
+        DashboardSummary summary = dashboardService.summary(null, null, null, null);
 
         assertThat(summary.totalPublications()).isEqualTo(2);
         assertThat(summary.departments()).isEqualTo(2);
@@ -60,36 +60,36 @@ class DashboardAggregationTest {
 
     @Test
     void chartsOmitRejectedAndInReviewRecords() {
-        assertThat(dashboardService.byDepartment(null, null, null))
+        assertThat(dashboardService.byDepartment(null, null, null, null))
                 .extracting(DepartmentCount::department)
                 .containsExactly("Biology", "Physics");
 
-        assertThat(dashboardService.byFaculty(null, null, null))
+        assertThat(dashboardService.byFaculty(null, null, null, null))
                 .extracting(FacultyCount::faculty, FacultyCount::count)
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple("Ada Lovelace", 2L),
                         org.assertj.core.groups.Tuple.tuple("Grace Hopper", 1L)
                 );
 
-        assertThat(dashboardService.byYear(null, null, null))
+        assertThat(dashboardService.byYear(null, null, null, null))
                 .extracting(row -> row.year())
                 .containsExactly(currentYear - 1, currentYear);
 
-        assertThat(dashboardService.recent(null, null, null))
+        assertThat(dashboardService.recent(null, null, null, null))
                 .extracting(row -> row.title())
                 .containsExactly("Verified physics", "Verified biology");
     }
 
     @Test
     void departmentFilterNarrowsEveryAggregate() {
-        DashboardSummary summary = dashboardService.summary("Biology", null, null);
+        DashboardSummary summary = dashboardService.summary("Biology", null, null, null);
 
         assertThat(summary.totalPublications()).isEqualTo(1);
         assertThat(summary.thisYear()).isZero();
-        assertThat(dashboardService.byFaculty("Biology", null, null))
+        assertThat(dashboardService.byFaculty("Biology", null, null, null))
                 .extracting(FacultyCount::faculty)
                 .containsExactly("Ada Lovelace", "Grace Hopper");
-        assertThat(dashboardService.recent("biology", currentYear - 1, currentYear))
+        assertThat(dashboardService.recent("biology", null, currentYear - 1, currentYear))
                 .extracting(row -> row.department())
                 .containsExactly("Biology");
     }

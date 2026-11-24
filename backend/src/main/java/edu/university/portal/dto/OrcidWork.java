@@ -8,6 +8,8 @@ public record OrcidWork(
         String journal,
         Integer year,
         String doi,
-        String orcidId
+        String orcidId,
+        boolean enrichedFromCrossref,
+        boolean alreadyExists
 ) {
 }

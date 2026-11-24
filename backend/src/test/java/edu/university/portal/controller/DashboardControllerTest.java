@@ -1,4 +1,4 @@
-package edu.university.portal.web;
+package edu.university.portal.controller;
 
 import edu.university.portal.dto.DashboardSummary;
 import edu.university.portal.dto.DepartmentCount;
@@ -41,7 +41,7 @@ class DashboardControllerTest {
 
     @Test
     void summaryReturnsTheFourCounts() throws Exception {
-        when(dashboardService.summary(isNull(), isNull(), isNull()))
+        when(dashboardService.summary(isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(new DashboardSummary(12, 4, 9, 3));
 
         mockMvc.perform(get("/api/dashboard/summary").accept(MediaType.APPLICATION_JSON))
@@ -54,13 +54,13 @@ class DashboardControllerTest {
 
     @Test
     void chartsAcceptTheSharedFilters() throws Exception {
-        when(dashboardService.byDepartment(eq("Physics"), eq(2020), eq(2024)))
+        when(dashboardService.byDepartment(eq("Physics"), isNull(), eq(2020), eq(2024)))
                 .thenReturn(List.of(new DepartmentCount("Physics", 2)));
-        when(dashboardService.byYear(eq("Physics"), eq(2020), eq(2024)))
+        when(dashboardService.byYear(eq("Physics"), isNull(), eq(2020), eq(2024)))
                 .thenReturn(List.of(new YearCount(2022, 2)));
-        when(dashboardService.byFaculty(eq("Physics"), eq(2020), eq(2024)))
+        when(dashboardService.byFaculty(eq("Physics"), isNull(), eq(2020), eq(2024)))
                 .thenReturn(List.of(new FacultyCount("Ada Lovelace", 2)));
-        when(dashboardService.recent(eq("Physics"), eq(2020), eq(2024)))
+        when(dashboardService.recent(eq("Physics"), isNull(), eq(2020), eq(2024)))
                 .thenReturn(List.of(new PublicationResponse(
                         3L,
                         "Low-Cost Interferometry",

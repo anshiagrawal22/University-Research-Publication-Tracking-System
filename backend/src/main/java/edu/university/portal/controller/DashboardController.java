@@ -1,4 +1,4 @@
-package edu.university.portal.web;
+package edu.university.portal.controller;
 
 import edu.university.portal.dto.DashboardSummary;
 import edu.university.portal.dto.DepartmentCount;
@@ -26,45 +26,50 @@ public class DashboardController {
     @GetMapping("/summary")
     public DashboardSummary summary(
             @RequestParam(required = false) String department,
+            @RequestParam(required = false) String faculty,
             @RequestParam(required = false) Integer fromYear,
             @RequestParam(required = false) Integer toYear
     ) {
-        return dashboardService.summary(department, fromYear, toYear);
+        return dashboardService.summary(department, faculty, fromYear, toYear);
     }
 
     @GetMapping("/by-department")
     public List<DepartmentCount> byDepartment(
             @RequestParam(required = false) String department,
+            @RequestParam(required = false) String faculty,
             @RequestParam(required = false) Integer fromYear,
             @RequestParam(required = false) Integer toYear
     ) {
-        return dashboardService.byDepartment(department, fromYear, toYear);
+        return dashboardService.byDepartment(department, faculty, fromYear, toYear);
     }
 
     @GetMapping("/by-year")
     public List<YearCount> byYear(
             @RequestParam(required = false) String department,
+            @RequestParam(required = false) String faculty,
             @RequestParam(required = false) Integer fromYear,
             @RequestParam(required = false) Integer toYear
     ) {
-        return dashboardService.byYear(department, fromYear, toYear);
+        return dashboardService.byYear(department, faculty, fromYear, toYear);
     }
 
     @GetMapping("/by-faculty")
     public List<FacultyCount> byFaculty(
             @RequestParam(required = false) String department,
+            @RequestParam(required = false) String faculty,
             @RequestParam(required = false) Integer fromYear,
             @RequestParam(required = false) Integer toYear
     ) {
-        return dashboardService.byFaculty(department, fromYear, toYear);
+        return dashboardService.byFaculty(department, faculty, fromYear, toYear);
     }
 
     @GetMapping("/recent")
     public List<PublicationResponse> recent(
             @RequestParam(required = false) String department,
+            @RequestParam(required = false) String faculty,
             @RequestParam(required = false) Integer fromYear,
             @RequestParam(required = false) Integer toYear
     ) {
-        return dashboardService.recent(department, fromYear, toYear);
+        return dashboardService.recent(department, faculty, fromYear, toYear);
     }
 }

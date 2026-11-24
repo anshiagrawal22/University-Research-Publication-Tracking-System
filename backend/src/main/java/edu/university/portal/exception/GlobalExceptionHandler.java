@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -26,14 +25,6 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Validation failed", request, ex.getFieldErrors());
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiError> beanValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
-        List<FieldErrorItem> fields = ex.getBindingResult().getFieldErrors().stream()
-                .map(field -> new FieldErrorItem(field.getField(), field.getDefaultMessage()))
-                .toList();
-        return error(HttpStatus.BAD_REQUEST, "Validation failed", request, fields);
-    }
-
     @ExceptionHandler(DuplicateDoiException.class)
     public ResponseEntity<ApiError> duplicate(DuplicateDoiException ex, HttpServletRequest request) {
         return error(
@@ -49,13 +40,8 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), request, List.of());
     }
 
-    @ExceptionHandler(CrossrefNotFoundException.class)
-    public ResponseEntity<ApiError> crossrefMissing(CrossrefNotFoundException ex, HttpServletRequest request) {
-        return error(HttpStatus.NOT_FOUND, ex.getMessage(), request, List.of());
-    }
-
-    @ExceptionHandler(CrossrefUnavailableException.class)
-    public ResponseEntity<ApiError> crossrefDown(CrossrefUnavailableException ex, HttpServletRequest request) {
+    @ExceptionHandler(ExternalApiException.class)
+    public ResponseEntity<ApiError> externalApi(ExternalApiException ex, HttpServletRequest request) {
         HttpStatus status = HttpStatus.resolve(ex.getStatus());
         if (status == null) {
             status = HttpStatus.BAD_GATEWAY;

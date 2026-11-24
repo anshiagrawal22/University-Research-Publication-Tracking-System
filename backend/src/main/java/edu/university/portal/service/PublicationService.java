@@ -2,6 +2,7 @@ package edu.university.portal.service;
 
 import edu.university.portal.dto.FieldErrorItem;
 import edu.university.portal.dto.PageResponse;
+import edu.university.portal.dto.PublicationFiltersResponse;
 import edu.university.portal.dto.PublicationRequest;
 import edu.university.portal.dto.PublicationResponse;
 import edu.university.portal.exception.DuplicateDoiException;
@@ -18,7 +19,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -26,42 +26,24 @@ public class PublicationService {
 
     private final PublicationRepository publications;
     private final ValidationService validationService;
-    private final SimilarityReviewService similarityReviewService;
 
-    public PublicationService(
-            PublicationRepository publications,
-            ValidationService validationService,
-            SimilarityReviewService similarityReviewService
-    ) {
+    public PublicationService(PublicationRepository publications, ValidationService validationService) {
         this.publications = publications;
         this.validationService = validationService;
-        this.similarityReviewService = similarityReviewService;
     }
 
+    // Save the publication after validating required fields and checking for duplicate DOIs.
     @Transactional
     public PublicationResponse create(PublicationRequest request) {
-        NormalizedPublication normalized = validationService.validateCreate(request);
-        PublicationStatus status = similarityReviewService
-                .findSimilar(normalized.title(), normalized.year(), normalized.doi())
-                .map(match -> PublicationStatus.IN_REVIEW)
-                .orElse(PublicationStatus.VERIFIED);
-
         Publication publication = new Publication();
-        publication.setTitle(normalized.title());
-        publication.setAuthors(new ArrayList<>(normalized.authors()));
-        publication.setDoi(normalized.doi());
-        publication.setYear(normalized.year());
-        publication.setDepartment(normalized.department());
-        publication.setJournal(normalized.journal());
-        publication.setOrcidId(normalized.orcidId());
-        publication.setSource(normalized.source());
-        publication.setStatus(status);
+        validationService.validateAndApply(request, publication, null);
+        publication.setStatus(PublicationStatus.VERIFIED);
         publication.setCreatedAt(Instant.now());
 
         try {
             return PublicationResponse.from(publications.save(publication));
         } catch (DataIntegrityViolationException ex) {
-            throw new DuplicateDoiException(normalized.doi());
+            throw new DuplicateDoiException(publication.getDoi());
         }
     }
 
@@ -69,6 +51,7 @@ public class PublicationService {
     public PageResponse<PublicationResponse> list(
             String search,
             String department,
+            String faculty,
             Integer year,
             String journal,
             PublicationStatus status,
@@ -82,14 +65,18 @@ public class PublicationService {
             throw new ValidationException(List.of(new FieldErrorItem("size", "Size must be between 1 and 100")));
         }
 
-        String searchTerm = blankToEmpty(search);
-        String departmentTerm = blankToEmpty(department);
-        String journalTerm = blankToEmpty(journal);
+        String searchTerm = trimOrEmpty(search);
+        String departmentTerm = trimOrEmpty(department);
+        String facultyTerm = trimOrEmpty(faculty);
+        String journalTerm = trimOrEmpty(journal);
+
         Page<Publication> result = publications.search(
                 status != null,
                 status == null ? PublicationStatus.VERIFIED : status,
                 !departmentTerm.isEmpty(),
                 departmentTerm,
+                !facultyTerm.isEmpty(),
+                facultyTerm,
                 year != null,
                 year == null ? 0 : year,
                 !journalTerm.isEmpty(),
@@ -109,10 +96,40 @@ public class PublicationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Publication " + id + " was not found"));
     }
 
-    private String blankToEmpty(String value) {
-        if (value == null) {
-            return "";
+    @Transactional
+    public PublicationResponse update(Long id, PublicationRequest request) {
+        Publication existing = publications.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Publication " + id + " was not found"));
+
+        validationService.validateAndApply(request, existing, id);
+        if (request != null && request.status() != null) {
+            existing.setStatus(request.status());
         }
-        return value.trim();
+
+        try {
+            return PublicationResponse.from(publications.save(existing));
+        } catch (DataIntegrityViolationException ex) {
+            throw new DuplicateDoiException(existing.getDoi());
+        }
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        Publication existing = publications.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Publication " + id + " was not found"));
+        publications.delete(existing);
+    }
+
+    @Transactional(readOnly = true)
+    public PublicationFiltersResponse filters() {
+        return new PublicationFiltersResponse(
+                publications.findDistinctDepartments(),
+                publications.findDistinctYears(),
+                publications.findDistinctAuthors()
+        );
+    }
+
+    private String trimOrEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 }

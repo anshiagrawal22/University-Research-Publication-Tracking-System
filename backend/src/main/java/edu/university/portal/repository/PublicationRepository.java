@@ -14,6 +14,17 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
 
     boolean existsByDoiIgnoreCase(String doi);
 
+    boolean existsByDoiIgnoreCaseAndIdNot(String doi, Long id);
+
+    @Query("SELECT DISTINCT p.department FROM Publication p ORDER BY p.department ASC")
+    List<String> findDistinctDepartments();
+
+    @Query("SELECT DISTINCT p.year FROM Publication p ORDER BY p.year DESC")
+    List<Integer> findDistinctYears();
+
+    @Query("SELECT DISTINCT a FROM Publication p JOIN p.authors a ORDER BY a ASC")
+    List<String> findDistinctAuthors();
+
     @Query(
             value = """
                     SELECT p FROM Publication p
@@ -22,6 +33,9 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
                         LEFT JOIN p2.authors a
                         WHERE (:applyStatus = false OR p2.status = :status)
                           AND (:applyDepartment = false OR LOWER(p2.department) = LOWER(:department))
+                          AND (:applyFaculty = false OR EXISTS (
+                                SELECT af FROM p2.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                          ))
                           AND (:applyYear = false OR p2.year = :year)
                           AND (:applyJournal = false OR LOWER(COALESCE(p2.journal, '')) LIKE LOWER(CONCAT('%', :journal, '%')))
                           AND (:applySearch = false
@@ -37,6 +51,9 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
                         LEFT JOIN p2.authors a
                         WHERE (:applyStatus = false OR p2.status = :status)
                           AND (:applyDepartment = false OR LOWER(p2.department) = LOWER(:department))
+                          AND (:applyFaculty = false OR EXISTS (
+                                SELECT af FROM p2.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                          ))
                           AND (:applyYear = false OR p2.year = :year)
                           AND (:applyJournal = false OR LOWER(COALESCE(p2.journal, '')) LIKE LOWER(CONCAT('%', :journal, '%')))
                           AND (:applySearch = false
@@ -50,6 +67,8 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             @Param("status") PublicationStatus status,
             @Param("applyDepartment") boolean applyDepartment,
             @Param("department") String department,
+            @Param("applyFaculty") boolean applyFaculty,
+            @Param("faculty") String faculty,
             @Param("applyYear") boolean applyYear,
             @Param("year") int year,
             @Param("applyJournal") boolean applyJournal,
@@ -62,12 +81,17 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             SELECT COUNT(p) FROM Publication p
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
+              AND (:applyFaculty = false OR EXISTS (
+                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+              ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
             """)
     long countVerified(
             @Param("applyDepartment") boolean applyDepartment,
             @Param("department") String department,
+            @Param("applyFaculty") boolean applyFaculty,
+            @Param("faculty") String faculty,
             @Param("applyFrom") boolean applyFrom,
             @Param("fromYear") int fromYear,
             @Param("applyTo") boolean applyTo,
@@ -77,12 +101,17 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             SELECT COUNT(DISTINCT p.department) FROM Publication p
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
+              AND (:applyFaculty = false OR EXISTS (
+                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+              ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
             """)
     long countVerifiedDepartments(
             @Param("applyDepartment") boolean applyDepartment,
             @Param("department") String department,
+            @Param("applyFaculty") boolean applyFaculty,
+            @Param("faculty") String faculty,
             @Param("applyFrom") boolean applyFrom,
             @Param("fromYear") int fromYear,
             @Param("applyTo") boolean applyTo,
@@ -92,12 +121,17 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             SELECT COUNT(DISTINCT a) FROM Publication p JOIN p.authors a
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
+              AND (:applyFaculty = false OR EXISTS (
+                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+              ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
             """)
     long countVerifiedAuthors(
             @Param("applyDepartment") boolean applyDepartment,
             @Param("department") String department,
+            @Param("applyFaculty") boolean applyFaculty,
+            @Param("faculty") String faculty,
             @Param("applyFrom") boolean applyFrom,
             @Param("fromYear") int fromYear,
             @Param("applyTo") boolean applyTo,
@@ -107,6 +141,9 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             SELECT p.department, COUNT(p) FROM Publication p
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
+              AND (:applyFaculty = false OR EXISTS (
+                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+              ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
             GROUP BY p.department
@@ -115,6 +152,8 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
     List<Object[]> countVerifiedByDepartment(
             @Param("applyDepartment") boolean applyDepartment,
             @Param("department") String department,
+            @Param("applyFaculty") boolean applyFaculty,
+            @Param("faculty") String faculty,
             @Param("applyFrom") boolean applyFrom,
             @Param("fromYear") int fromYear,
             @Param("applyTo") boolean applyTo,
@@ -124,6 +163,9 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             SELECT p.year, COUNT(p) FROM Publication p
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
+              AND (:applyFaculty = false OR EXISTS (
+                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+              ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
             GROUP BY p.year
@@ -132,6 +174,8 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
     List<Object[]> countVerifiedByYear(
             @Param("applyDepartment") boolean applyDepartment,
             @Param("department") String department,
+            @Param("applyFaculty") boolean applyFaculty,
+            @Param("faculty") String faculty,
             @Param("applyFrom") boolean applyFrom,
             @Param("fromYear") int fromYear,
             @Param("applyTo") boolean applyTo,
@@ -141,6 +185,9 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             SELECT a, COUNT(p) FROM Publication p JOIN p.authors a
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
+              AND (:applyFaculty = false OR EXISTS (
+                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+              ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
             GROUP BY a
@@ -149,6 +196,8 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
     List<Object[]> countVerifiedByAuthor(
             @Param("applyDepartment") boolean applyDepartment,
             @Param("department") String department,
+            @Param("applyFaculty") boolean applyFaculty,
+            @Param("faculty") String faculty,
             @Param("applyFrom") boolean applyFrom,
             @Param("fromYear") int fromYear,
             @Param("applyTo") boolean applyTo,
@@ -158,6 +207,9 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             SELECT p FROM Publication p
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
+              AND (:applyFaculty = false OR EXISTS (
+                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+              ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
             ORDER BY p.createdAt DESC
@@ -165,6 +217,8 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
     List<Publication> findRecentVerified(
             @Param("applyDepartment") boolean applyDepartment,
             @Param("department") String department,
+            @Param("applyFaculty") boolean applyFaculty,
+            @Param("faculty") String faculty,
             @Param("applyFrom") boolean applyFrom,
             @Param("fromYear") int fromYear,
             @Param("applyTo") boolean applyTo,

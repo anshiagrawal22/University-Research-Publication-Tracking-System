@@ -1,7 +1,7 @@
-package edu.university.portal.web;
+package edu.university.portal.controller;
 
 import edu.university.portal.dto.CrossrefWork;
-import edu.university.portal.service.CrossrefClient;
+import edu.university.portal.service.CrossrefService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -11,10 +11,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/crossref")
 public class CrossrefController {
 
-    private final CrossrefClient crossrefClient;
+    private final CrossrefService crossrefService;
 
-    public CrossrefController(CrossrefClient crossrefClient) {
-        this.crossrefClient = crossrefClient;
+    public CrossrefController(CrossrefService crossrefService) {
+        this.crossrefService = crossrefService;
     }
 
     @GetMapping("/{*doi}")
@@ -22,6 +22,6 @@ public class CrossrefController {
         if (doi.startsWith("/")) {
             doi = doi.substring(1);
         }
-        return crossrefClient.lookup(doi);
+        return crossrefService.fetchByDoi(doi);
     }
 }
