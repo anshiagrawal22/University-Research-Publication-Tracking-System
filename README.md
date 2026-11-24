@@ -1,17 +1,19 @@
 # University Research Publication Tracking System
 
-Phase 2 of the research publication tracking project: a Spring Boot API and a React portal. H2 keeps the data in memory. Later phases can replace the database, add the review queue, and wrap the same folders in Jenkins and Docker.
+A full-stack Spring Boot and React/Vite application for centralizing university research publication records via manual entry, Crossref DOI lookup, and ORCID profile import.
 
 ## Layout
 
 ```
-backend/     Maven project (Java 17, Spring Boot 3)
-frontend/    Vite + React
+backend/     Spring Boot 3 API (Java 17+, Maven, H2 / JPA)
+frontend/    React + Vite portal
 ```
 
 ## Run
 
 Use two terminals.
+
+### 1. Backend
 
 ```bash
 cd backend
@@ -19,7 +21,13 @@ mvn clean test package
 mvn spring-boot:run
 ```
 
-The API listens on http://localhost:8080. The `dev` profile is active by default and seeds about 30 publications. Tests use the `test` profile and do not seed.
+The API listens on `http://localhost:8080` by default (override with `--server.port=8082` if port `8080` is occupied).
+
+- **Database:** File-backed H2 (`./data/publications`) persists records across restarts (`DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, and `JPA_DDL_AUTO` can override defaults).
+- **Seed data:** The `dev` profile is active by default and seeds 30 sample publications only when the database is empty (`app.seed.enabled=true`). Tests run with the `test` profile against an isolated in-memory database.
+- **ORCID API:** Uses the ORCID Public API (`https://pub.orcid.org/v3.0`) and enriches works with Crossref metadata when DOIs are present. Optionally set `ORCID_CLIENT_ID` and `ORCID_CLIENT_SECRET` environment variables for authenticated `/read-public` requests.
+
+### 2. Frontend
 
 ```bash
 cd frontend
@@ -27,30 +35,31 @@ npm install
 npm run dev
 ```
 
-The portal listens on http://localhost:5173 and proxies `/api` to the backend. CORS also allows that origin if you call the API directly.
+For production bundling:
+
+```bash
+cd frontend
+npm run build
+```
+
+The portal listens on `http://localhost:5173` and proxies `/api` to `http://localhost:8080` (or set `VITE_API_URL` if running the backend on another port).
 
 ## API
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/api/publications` | Create a publication. Duplicate DOI returns 409. |
-| GET | `/api/publications` | `search`, `department`, `year`, `journal`, `status`, `page`, `size` |
-| GET | `/api/publications/{id}` | One record |
-| GET | `/api/crossref/{doi}` | Crossref lookup. DOI slashes stay in the path. |
-| GET | `/api/orcid/{orcidId}/works` | Stub. Real ORCID credentials are a later phase. |
-| GET | `/api/dashboard/summary` | Verified records only |
+| POST | `/api/publications` | Create a publication. Duplicate DOI returns `409`. |
+| GET | `/api/publications` | Filter by `search`, `department`, `faculty`, `year`, `journal`, `status`, `page`, `size` |
+| GET | `/api/publications/filters` | Distinct `departments`, `years`, and `faculties` in the database |
+| GET | `/api/publications/{id}` | Fetch one publication |
+| PUT | `/api/publications/{id}` | Update a publication (`409` on duplicate DOI) |
+| DELETE | `/api/publications/{id}` | Delete a publication (`204 No Content`) |
+| GET | `/api/crossref/{doi}` | Crossref DOI metadata lookup |
+| GET | `/api/orcid/{orcidId}/works` | Fetch public ORCID works enriched via Crossref |
+| GET | `/api/dashboard/summary` | Verified totals (`department`, `faculty`, `fromYear`, `toYear`) |
 | GET | `/api/dashboard/by-department` | `[{department, count}]` |
 | GET | `/api/dashboard/by-year` | `[{year, count}]` |
 | GET | `/api/dashboard/by-faculty` | Top 10 `[{faculty, count}]` |
 | GET | `/api/dashboard/recent` | Latest 10 verified publications |
 
-Dashboard routes also accept `department`, `fromYear`, and `toYear`.
-
 Errors share one JSON shape: `timestamp`, `status`, `error`, `message`, `path`, `fieldErrors`.
-
-## Hooks for later phases
-
-- `SimilarityReviewService` is the extension point for title/year similarity and the review queue. The current implementation finds nothing, so new submissions are stored as `VERIFIED`.
-- `OrcidWorksService` is implemented by `StubOrcidWorksService` until ORCID credentials exist.
-- JPA entities and repositories avoid vendor SQL so the H2 datasource can be swapped.
-- `PublicationDataSeeder` runs only for the `dev` profile, and only when `app.seed.enabled` is true.
