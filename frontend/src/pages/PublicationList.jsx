@@ -6,12 +6,14 @@ import {
   fetchFilterOptions,
   fetchPublications,
   fetchSecurityGateReport,
+  formatAuthors,
   getErrorMessage,
   publishPublication,
   updatePublication,
   validatePublicationFields,
 } from '../services/publicationApi';
 import { useToast } from '../components/Toast';
+import Select from '../components/Select';
 
 const STATUSES = [
   { value: '', label: 'All statuses' },
@@ -263,34 +265,35 @@ export default function PublicationList() {
         </label>
         <label>
           <span>Department</span>
-          <select value={department} onChange={(event) => setDepartment(event.target.value)}>
-            <option value="">All departments</option>
-            {filterOptions.departments.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
+          <Select
+            value={department}
+            onChange={setDepartment}
+            options={[{ value: '', label: 'All departments' }, ...filterOptions.departments.map((item) => ({ value: item, label: item }))]}
+          />
         </label>
         <label>
           <span>Faculty</span>
-          <select value={faculty} onChange={(event) => setFaculty(event.target.value)}>
-            <option value="">All faculty</option>
-            {filterOptions.faculties.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
+          <Select
+            value={faculty}
+            onChange={setFaculty}
+            options={[{ value: '', label: 'All faculty' }, ...filterOptions.faculties.map((item) => ({ value: item, label: item }))]}
+          />
         </label>
         <label>
           <span>Year</span>
-          <select value={year} onChange={(event) => setYear(event.target.value)}>
-            <option value="">All years</option>
-            {filterOptions.years.map((item) => <option key={item} value={String(item)}>{item}</option>)}
-          </select>
+          <Select
+            value={year}
+            onChange={setYear}
+            options={[{ value: '', label: 'All years' }, ...filterOptions.years.map((item) => ({ value: String(item), label: String(item) }))]}
+          />
         </label>
         <label>
           <span>Status</span>
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
-            {STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
+          <Select value={status} onChange={setStatus} options={STATUSES} />
         </label>
         <div className="filter-reset">
-          <button type="button" className="button button-secondary" onClick={resetFilters} disabled={!hasFilters}>
-            Reset
+          <button type="button" className="button button-ghost" onClick={resetFilters} disabled={!hasFilters}>
+            Clear filters
           </button>
         </div>
       </div>
@@ -337,8 +340,8 @@ export default function PublicationList() {
                       {row.journal && <span className="cell-sub">{row.journal}</span>}
                       {row.doi && <span className="cell-sub">DOI {row.doi}</span>}
                     </td>
-                    <td data-label="Authors">{row.authors.join(', ')}</td>
-                    <td data-label="Department"><span className="tag">{row.department}</span></td>
+                    <td data-label="Authors" title={row.authors.length > 4 ? `${row.authors.length.toLocaleString()} authors` : undefined}>{formatAuthors(row.authors)}</td>
+                    <td data-label="Department">{row.department}</td>
                     <td data-label="Year">{row.year}</td>
                     <td data-label="Status">
                       <div className="status-stack">
@@ -491,16 +494,13 @@ export default function PublicationList() {
                 </label>
                 <label>
                   Department
-                  <select
+                  <Select
                     value={editing.department}
-                    onChange={(event) => setEditing((curr) => ({ ...curr, department: event.target.value }))}
+                    onChange={(next) => setEditing((curr) => ({ ...curr, department: next }))}
                     aria-invalid={Boolean(editErrors.department)}
-                  >
-                    <option value="">Select a department</option>
-                    {filterOptions.departments.map((dept) => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
-                  </select>
+                    placeholder="Select a department"
+                    options={filterOptions.departments.map((dept) => ({ value: dept, label: dept }))}
+                  />
                   {editErrors.department && <span className="field-error">{editErrors.department}</span>}
                 </label>
               </div>
@@ -516,14 +516,11 @@ export default function PublicationList() {
                 </label>
                 <label>
                   Status
-                  <select
+                  <Select
                     value={editing.status}
-                    onChange={(event) => setEditing((curr) => ({ ...curr, status: event.target.value }))}
-                  >
-                    {STATUSES.filter((item) => item.value).map((item) => (
-                      <option key={item.value} value={item.value}>{item.label}</option>
-                    ))}
-                  </select>
+                    onChange={(next) => setEditing((curr) => ({ ...curr, status: next }))}
+                    options={STATUSES.filter((item) => item.value)}
+                  />
                 </label>
               </div>
               <label>
