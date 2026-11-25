@@ -7,7 +7,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      '/api': 'http://localhost:8080',
+      // Must match the backend's server.port (default 8081). Override with BACKEND_URL.
+      '/api': process.env.BACKEND_URL || 'http://localhost:8081',
     },
   },
 });

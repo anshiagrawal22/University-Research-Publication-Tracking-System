@@ -1,7 +1,8 @@
 # File-backed H2 persists records across restarts without requiring external DB setup.
 # Entities and repositories use standard JPA — no vendor-specific SQL.
 server:
-  port: 8080
+  # 8081 by default because 8080 is commonly taken by other local tools (e.g. Jenkins). Override with SERVER_PORT.
+  port: ${SERVER_PORT:8081}
   error:
     include-message: never
     include-binding-errors: never

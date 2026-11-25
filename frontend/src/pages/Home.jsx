@@ -1,47 +1,140 @@
-import { BarChart3, BookOpen, Library } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowRight, IdCard, Link2, PenLine } from 'lucide-react';
+import { fetchDashboardSummary, fetchRecentPublications, formatAuthors } from '../services/publicationApi';
 
-const CARDS = [
+const ADD_OPTIONS = [
   {
     to: '/submit',
-    icon: BookOpen,
-    title: 'Submit a publication',
-    text: 'Add a record by hand, fetch details from a Crossref DOI, or import works from ORCID.',
+    icon: Link2,
+    title: 'Fetch using DOI',
+    text: 'Paste a DOI and the details come from Crossref.',
   },
   {
-    to: '/publications',
-    icon: Library,
-    title: 'Browse the register',
-    text: 'Search by title, author, or DOI, and filter by department, year, and status.',
+    to: '/submit?mode=orcid',
+    icon: IdCard,
+    title: 'Import from ORCID',
+    text: 'Pull several public works from a researcher’s profile.',
   },
   {
-    to: '/dashboard',
-    icon: BarChart3,
-    title: 'Research dashboard',
-    text: 'Review verified output by department, year, and faculty.',
+    to: '/submit?mode=manual',
+    icon: PenLine,
+    title: 'Enter manually',
+    text: 'For records without a DOI or ORCID entry.',
   },
 ];
 
 export default function Home() {
+  const [summary, setSummary] = useState(null);
+  const [recent, setRecent] = useState([]);
+  const [state, setState] = useState('loading');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    Promise.all([fetchDashboardSummary(controller.signal), fetchRecentPublications(controller.signal)])
+      .then(([summaryData, recentData]) => {
+        setSummary(summaryData);
+        setRecent(recentData || []);
+        setState('ready');
+      })
+      .catch((error) => {
+        if (error?.code !== 'ERR_CANCELED') setState('error');
+      });
+    return () => controller.abort();
+  }, []);
+
+  const stats = [
+    { label: 'Verified publications', value: summary?.totalPublications },
+    { label: 'Departments', value: summary?.departments },
+    { label: 'Authors', value: summary?.authors },
+    { label: `Published in ${new Date().getFullYear()}`, value: summary?.thisYear },
+  ];
+
   return (
     <div className="home">
-      <p className="eyebrow">Research Office</p>
-      <h1>A quiet record of the university’s scholarship</h1>
-      <p className="lede">
-        The research office keeps one register of scholarly work across departments.
-        Submit a publication, browse what has been recorded, or read the verified totals on the dashboard.
-      </p>
-      <div className="info-grid">
-        {CARDS.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Link key={card.to} to={card.to} className="info-card">
-              <Icon size={20} strokeWidth={1.5} aria-hidden="true" />
-              <h2>{card.title}</h2>
-              <p>{card.text}</p>
+      <section className="home-intro">
+        <div>
+          <p className="eyebrow">Research Office</p>
+          <h1>Research Publication Register</h1>
+          <p className="lede">
+            Record new publications, look up what has already been submitted, and follow verified output by department.
+          </p>
+        </div>
+        <div className="home-actions">
+          <Link to="/publications" className="button button-primary">Browse the register</Link>
+          <Link to="/dashboard" className="button button-secondary">Open dashboard</Link>
+        </div>
+      </section>
+
+      <section className="stat-strip" aria-label="Register at a glance" aria-busy={state === 'loading'}>
+        {stats.map((stat) => (
+          <div key={stat.label} className="stat">
+            <p className="stat-value">
+              {state === 'loading' ? <span className="skeleton stat-skeleton" /> : state === 'error' ? '–' : stat.value ?? 0}
+            </p>
+            <p className="stat-label">{stat.label}</p>
+          </div>
+        ))}
+      </section>
+      {state === 'error' && (
+        <p className="note home-note">Counts are unavailable right now. The register service could not be reached.</p>
+      )}
+
+      <div className="home-grid">
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Recently verified</h2>
+            <Link to="/publications" className="text-link">
+              View all <ArrowRight size={15} strokeWidth={1.8} aria-hidden="true" />
             </Link>
-          );
-        })}
+          </div>
+          {state === 'loading' ? (
+            <div className="skeleton-stack">
+              <div className="skeleton skeleton-row" />
+              <div className="skeleton skeleton-row" />
+              <div className="skeleton skeleton-row" />
+            </div>
+          ) : recent.length === 0 ? (
+            <p className="empty-inline">
+              {state === 'error' ? 'Recent publications could not be loaded.' : 'Nothing has been verified yet.'}
+            </p>
+          ) : (
+            <ul className="recent-list">
+              {recent.map((item) => (
+                <li key={item.id}>
+                  <div>
+                    <h3>{item.title}</h3>
+                    <p title={item.authors.length > 4 ? `${item.authors.length.toLocaleString()} authors` : undefined}>{formatAuthors(item.authors)}</p>
+                    <p className="cell-sub">
+                      {[item.journal, item.year, item.department].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <aside className="panel add-panel" aria-labelledby="add-heading">
+          <h2 id="add-heading">Add a publication</h2>
+          <ul className="add-list">
+            {ADD_OPTIONS.map((option) => {
+              const Icon = option.icon;
+              return (
+                <li key={option.title}>
+                  <Link to={option.to} className="add-option">
+                    <Icon size={18} strokeWidth={1.7} aria-hidden="true" />
+                    <span>
+                      <strong>{option.title}</strong>
+                      <span>{option.text}</span>
+                    </span>
+                    <ArrowRight className="add-arrow" size={16} strokeWidth={1.8} aria-hidden="true" />
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
       </div>
     </div>
   );
