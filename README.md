@@ -1,33 +1,31 @@
 # University Research Publication Tracking System
 
-A full-stack Spring Boot and React/Vite application for centralizing university research publication records via manual entry, Crossref DOI lookup, and ORCID profile import.
+A web app for keeping track of the research papers published by university staff. You can add a paper by typing in its DOI, by importing it from someone's ORCID profile, or by filling in the details yourself. Every new paper goes through a few automatic checks before it shows up on the public dashboard.
 
-## Layout
+The backend is Spring Boot (Java) with an H2 database stored in a file. The frontend is React, built with Vite.
 
 ```
-backend/     Spring Boot 3 API (Java 17+, Maven, H2 / JPA)
-frontend/    React + Vite portal
+backend/     Spring Boot API, database, tests
+frontend/    React app (the website)
+scripts/     helper scripts used by CI
+Jenkinsfile  Jenkins pipeline
+docker-compose.yml
 ```
 
-## Run
+## Running it on your machine
 
-Use two terminals.
+You need Java 17 or newer, Maven 3.9 and Node.js 20.
 
-### 1. Backend
+Start the backend in one terminal:
 
 ```bash
 cd backend
-mvn clean test package
 mvn spring-boot:run
 ```
 
-The API listens on `http://localhost:8081` by default (port `8080` is often taken by other local tools such as Jenkins). Override it with the `SERVER_PORT` environment variable or `--server.port=8082`.
+It runs on **http://localhost:8081**. We use 8081 rather than Spring's usual 8080 because Jenkins and other tools often sit on 8080.
 
-- **Database:** File-backed H2 (`./data/publications`) persists records across restarts (`DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, and `JPA_DDL_AUTO` can override defaults).
-- **Seed data:** The `dev` profile is active by default and seeds 30 sample publications only when the database is empty (`app.seed.enabled=true`). Tests run with the `test` profile against an isolated in-memory database.
-- **ORCID API:** Uses the ORCID Public API (`https://pub.orcid.org/v3.0`) and enriches works with Crossref metadata when DOIs are present. Optionally set `ORCID_CLIENT_ID` and `ORCID_CLIENT_SECRET` environment variables for authenticated `/read-public` requests.
-
-### 2. Frontend
+Then start the frontend in a second terminal:
 
 ```bash
 cd frontend
@@ -35,76 +33,126 @@ npm install
 npm run dev
 ```
 
-For production bundling:
+Open **http://localhost:5173**. The frontend passes every `/api/...` request on to the backend at 8081, so you don't need to configure anything if you use the default ports.
 
-```bash
-cd frontend
-npm run build
-```
+The first time the backend starts with an empty database, it adds 30 sample publications so there is something to look at.
 
-The portal listens on `http://localhost:5173` and proxies `/api` to `http://localhost:8081`. If the backend runs on another port, start the dev server with `BACKEND_URL=http://localhost:<port>` (or set `VITE_API_URL` to call the API directly).
+### If you need different ports
 
-## CI/CD & Docker
+- Backend: set `SERVER_PORT`, for example `SERVER_PORT=8090 mvn spring-boot:run` (or `--server.port=8090`).
+- Frontend: tell it where the backend is with `BACKEND_URL=http://localhost:8090 npm run dev`.
 
-The repository includes containerization and two integrated CI/CD pipelines with security gates:
+`VITE_API_URL` also works. It makes the browser call the backend directly instead of going through the dev server. If you use it, the backend has to allow your frontend's address in `CORS_ALLOWED_ORIGINS`.
 
-### Run with Docker Compose
+## Adding publications
+
+The **Submit Publication** page has three tabs:
+
+- **Fetch using DOI**: paste a DOI or a `https://doi.org/...` link. Title, authors, year and journal are filled in from Crossref, and you pick the department. If Crossref is missing something, the page tells you what to fill in.
+- **Import from ORCID**: enter an ORCID iD to list that person's public works and import several at once. Works that have a DOI are filled in from Crossref, and works already in the register are greyed out.
+- **Enter manually**: type everything in. A DOI is optional.
+
+Before you submit, the page checks that the required fields are filled in. It also looks for an existing record with the same DOI or title, and warns you if a similar title is already in the register.
+
+## How a paper goes live
+
+New submissions don't appear on the dashboard straight away. When you submit, the app runs four checks:
+
+1. **Input safety**: no HTML, scripts or other code hidden in the title, authors or journal.
+2. **Identifiers**: the DOI looks genuine and any ORCID iD has a valid checksum.
+3. **Duplicates and metadata**: no other paper with the same title and year, the year isn't more than a year in the future, and the title isn't a placeholder.
+4. **Venue**: the journal isn't on the blocked list (predatory or unreviewed venues), and there are no web links in the title or journal name.
+
+Anything that looks like code in the text is refused immediately and never saved. Otherwise a paper that passes all four checks is saved as **In review**, and one that fails is saved as **Rejected**.
+
+To make a paper public, click the shield button next to it in the register. That runs the checks again and shows the result for each one. If they all pass, click **Approve & Publish Live** and the paper becomes **Verified**. Only verified papers are counted on the dashboard.
+
+## The database
+
+Records are kept in `backend/data/publications.mv.db`. That folder is ignored by Git, so everyone has their own copy.
+
+- To start fresh, stop the backend and delete `backend/data/`. The sample data comes back on the next start.
+- Each save is written to disk immediately (`WRITE_DELAY=0` in the database URL), so a crash doesn't lose recent changes.
+- To use a different database, set `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
+
+## Running with Docker
 
 ```bash
 docker compose up -d --build
 ```
 
-- **Frontend (Nginx):** `http://localhost:3000` (proxies `/api` to the backend container)
-- **Backend API:** `http://localhost:8080` (persists H2 data in the `publication_data` Docker volume)
+This builds both apps and starts them:
 
-### Pipelines & Security Gates
+- Website: http://localhost:3000
+- API: http://localhost:8080
 
-- **GitHub Actions:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pushes/PRs to `main` (and `workflow_dispatch`):
-  1. **Security Gate (Static & Dependency Scan):** Runs `scripts/security-scan.sh` (secret hygiene + `npm audit`) and Trivy filesystem vulnerability/misconfiguration/secret scanning.
-  2. **Backend & Frontend Builds:** Runs `mvn -B -f backend/pom.xml clean verify` and `npm run build`, uploading build and test artifacts.
-  3. **Docker Build, Image Scan & Live Gate Verify:** Builds `backend` and `frontend` Docker images, scans both images with Trivy, boots the stack with `docker compose up -d`, and runs `scripts/verify-deployment.sh` to verify container health and live publication security gates.
-  4. **Jenkins Trigger:** On `main` pushes, optionally triggers `JENKINS_WEBHOOK_URL` (with optional `JENKINS_WEBHOOK_TOKEN`) when configured in repository secrets.
-- **Jenkins:** [`Jenkinsfile`](Jenkinsfile) runs `Checkout` -> `Frontend install & audit` -> `Security Gate — Code & Dependencies` -> `Backend build & test` -> `Frontend production build` -> `Docker image creation` -> `Security Gate — Container scan` (when `trivy` is installed) -> `Deploy containers & verify`, archiving JUnit reports, the backend JAR, and the frontend `dist` bundle.
+If 8080 or 3000 is already taken on your machine (Jenkins often uses 8080), choose other ports, for example `BACKEND_PORT=8085 FRONTEND_PORT=3001 docker compose up -d --build`.
 
-### Configure Jenkins
+The database is kept in a Docker volume called `publication_data`, so it survives restarts. `docker compose down -v` deletes it.
 
-1. Install Jenkins with Git, Pipeline, NodeJS, and Docker Pipeline/CLI access on the agent. Configure these global tools under **Manage Jenkins → Tools**:
-   - A JDK 17 installation named `JDK17`.
-   - Maven 3.9 (or compatible) named `Maven3`.
-   - Node.js 20 named `Node20` (provided by the NodeJS plugin).
-2. Create a Pipeline or Multibranch Pipeline job pointing at this repository. For a Pipeline job, select **Pipeline script from SCM**, choose Git, and set the script path to `Jenkinsfile`.
-3. Configure your repository webhook (or set `JENKINS_WEBHOOK_URL` in GitHub Actions secrets) so Jenkins is triggered automatically on pushes to `main`. Store SCM/webhook credentials in Jenkins Credentials or GitHub Secrets; never commit secrets into `Jenkinsfile`.
-4. Run the job. Jenkins builds, tests, scans, deploys the Docker containers, verifies live endpoints, and archives build artifacts.
+## CI and Jenkins
 
-## Pre-Publish Security Gates
+**GitHub Actions** (`.github/workflows/ci.yml`) runs on every push and pull request to `main`:
 
-Before any submitted paper becomes live (`VERIFIED`) on the dashboard and verified register, it is evaluated by `SecurityGateService`:
+1. A security scan: `scripts/security-scan.sh` checks for committed secrets and runs `npm audit`, then Trivy scans the files.
+2. The backend is built and tested (`mvn clean verify`), and the frontend is built.
+3. The Docker images are built and scanned, the stack is started, and `scripts/verify-deployment.sh` checks that it works.
+4. If the `JENKINS_WEBHOOK_URL` secret is set, Jenkins is triggered.
 
-1. **Input & XSS Sanitization (`INPUT_SECURITY`):** Blocks `<script>`/HTML tags, dangerous URI schemes (`javascript:`, `data:text/html`), inline DOM event handlers, control characters, and injection payloads immediately (`400 Bad Request`).
-2. **DOI & ORCID Verification (`IDENTIFIER_INTEGRITY`):** Blocks suspicious DOI domains/path traversal and verifies ORCID ISO 7064 Mod 11-2 checksums and persistent identifier presence.
-3. **Duplicate & Metadata Integrity (`DUPLICATE_AND_METADATA`):** Rejects duplicate title+year entries, future years beyond `currentYear + 1`, and short/placeholder titles.
-4. **Venue & Release Policy (`PUBLICATION_POLICY`):** Blocks untrusted/unreviewed preprint or predatory venues and embedded URLs in title/journal fields.
+**Jenkins** uses the `Jenkinsfile` in the repo and runs the same kind of steps, ending with a deploy. To set it up:
 
-New submissions enter `IN_REVIEW` (or `REJECTED` if a gate fails) and can only transition to `VERIFIED` via `POST /api/publications/{id}/publish` (or `PUT /api/publications/{id}`) after passing all security gates (`422 Unprocessable Entity` if blocked).
+1. Install the Git, Pipeline, NodeJS and Docker Pipeline plugins. Under *Manage Jenkins → Tools*, add a JDK 17 called `JDK17`, Maven called `Maven3` and Node.js 20 called `Node20`.
+2. Create a Pipeline job, choose *Pipeline script from SCM*, point it at this repo and set the script path to `Jenkinsfile`.
+3. Add a webhook (or the `JENKINS_WEBHOOK_URL` secret in GitHub) so pushes to `main` start a build. Keep credentials in Jenkins or GitHub secrets, never in the repo.
+
+## Tests
+
+```bash
+cd backend
+mvn test
+```
+
+The tests use their own in-memory database, so they don't touch your data. They cover validation, duplicate DOIs, the dashboard numbers and filters, the security checks, and the Crossref/ORCID code (with recorded responses, so no internet is needed).
+
+## Settings
+
+| Variable | Default | What it's for |
+| --- | --- | --- |
+| `SERVER_PORT` | `8081` | Backend port |
+| `DB_URL` | file database in `backend/data` | Database connection |
+| `CORS_ALLOWED_ORIGINS` | localhost:5173, :3000 | Which websites may call the API directly |
+| `ORCID_CLIENT_ID`, `ORCID_CLIENT_SECRET` | empty | Optional ORCID API credentials. Without them, the public API is used, which is fine for normal use |
+| `BACKEND_URL` | `http://localhost:8081` | Where the frontend dev server sends `/api` requests |
+| `VITE_API_URL` | empty | Makes the browser call the API at this address directly |
 
 ## API
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| POST | `/api/publications` | Submit a publication through security gates (`IN_REVIEW` or `REJECTED`). Duplicate DOI returns `409`. |
-| GET | `/api/publications` | Filter by `search`, `department`, `faculty`, `year`, `journal`, `status`, `page`, `size` |
-| GET | `/api/publications/filters` | Distinct `departments`, `years`, and `faculties` in the database |
-| GET | `/api/publications/{id}` | Fetch one publication |
-| PUT | `/api/publications/{id}` | Update a publication (`409` on duplicate DOI, `422` if publishing fails security gates) |
-| GET | `/api/publications/{id}/security-gate` | Inspect detailed 4-gate security evaluation report |
-| POST | `/api/publications/{id}/publish` | Run security gates and publish live (`VERIFIED`); blocked papers return `422` |
-| DELETE | `/api/publications/{id}` | Delete a publication (`204 No Content`) |
-| GET | `/api/crossref/{doi}` | Crossref DOI metadata lookup |
-| GET | `/api/orcid/{orcidId}/works` | Fetch public ORCID works enriched via Crossref |
-| GET | `/api/dashboard/summary` | Verified totals (`department`, `faculty`, `fromYear`, `toYear`) |
-| GET | `/api/dashboard/by-department` | `[{department, count}]` |
-| GET | `/api/dashboard/by-year` | `[{year, count}]` |
-| GET | `/api/dashboard/by-faculty` | Top 10 `[{faculty, count}]` |
-| GET | `/api/dashboard/recent` | Latest 10 verified publications |
+All endpoints are under `/api`. Errors come back as JSON with `status`, `message` and, for form problems, a `fieldErrors` list.
 
-Errors share one JSON shape: `timestamp`, `status`, `error`, `message`, `path`, `fieldErrors`.
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/publications` | List publications. Filters: `search`, `department`, `faculty`, `year`, `journal`, `status`, `page`, `size` |
+| GET | `/api/publications/filters` | Departments, years and author names for the filter dropdowns |
+| GET | `/api/publications/{id}` | One publication |
+| POST | `/api/publications` | Submit a publication (starts as In review). A duplicate DOI returns 409 |
+| PUT | `/api/publications/{id}` | Edit a publication |
+| DELETE | `/api/publications/{id}` | Delete a publication |
+| GET | `/api/publications/{id}/security-gate` | Run the four checks and show the results |
+| POST | `/api/publications/{id}/publish` | Publish if all checks pass (returns 422 if not) |
+| GET | `/api/crossref/{doi}` | Look up a DOI on Crossref |
+| GET | `/api/orcid/{orcidId}/works` | List a person's public works from ORCID |
+| GET | `/api/dashboard/summary` | Totals for verified papers. Filters: `department`, `faculty`, `fromYear`, `toYear` |
+| GET | `/api/dashboard/by-department` | Paper count per department |
+| GET | `/api/dashboard/by-year` | Paper count per year |
+| GET | `/api/dashboard/by-faculty` | Top 10 authors by paper count |
+| GET | `/api/dashboard/recent` | 10 most recently verified papers |
+
+## When something goes wrong
+
+**The website loads but shows no data.** The frontend can't reach the backend. Check that the backend is running and that it's on the port the frontend expects (8081 unless you changed it). If you started the frontend with `VITE_API_URL`, make sure that address is right.
+
+**"Port 8081 is already in use."** Something else is using it, often an old copy of the backend. Stop it, or start the backend on another port (see above).
+
+**A DOI or ORCID lookup fails.** The message on the page says whether the service was slow, unreachable or returned an error. Crossref and ORCID sometimes have short outages. You can always enter the details by hand instead.
+
+**ORCID import takes a while.** For works with a DOI, the app fetches the details from Crossref, two at a time (Crossref turns away clients that send more at once). It looks up at most 20 works per import; anything beyond that, or anything Crossref hasn't answered within about 20 seconds, keeps the details from ORCID.

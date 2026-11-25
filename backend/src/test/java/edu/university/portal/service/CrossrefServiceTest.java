@@ -83,6 +83,31 @@ class CrossrefServiceTest {
                 .hasMessageContaining("did not respond");
     }
 
+    @Test
+    void tooManyRequestsIsRetriedThenSucceeds() throws IOException {
+        // Crossref answers 429 when a client has too many requests open; one retry should be enough.
+        server.expect(requestTo(containsString("api.crossref.org/works/")))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        server.expect(requestTo(containsString("api.crossref.org/works/")))
+                .andRespond(withSuccess(fixture("/crossref/work-ok.json"), MediaType.APPLICATION_JSON));
+
+        CrossrefWork work = service.fetchByDoi("10.5555/example.2024.001");
+
+        assertThat(work.title()).isEqualTo("River Sensors and Campus Flood Models");
+        server.verify();
+    }
+
+    @Test
+    void connectionFailureIsNotReportedAsATimeout() {
+        server.expect(requestTo(containsString("api.crossref.org/works/")))
+                .andRespond(withException(new java.net.ConnectException("Connection refused")));
+
+        assertThatThrownBy(() -> service.fetchByDoi("10.5555/offline.work"))
+                .isInstanceOf(ExternalApiException.class)
+                .hasMessageContaining("Could not connect to Crossref")
+                .satisfies(ex -> assertThat(((ExternalApiException) ex).getStatus()).isEqualTo(503));
+    }
+
     private String fixture(String path) throws IOException {
         try (var input = getClass().getResourceAsStream(path)) {
             if (input == null) {

@@ -14,7 +14,9 @@ spring:
   profiles:
     active: dev
   datasource:
-    url: ${DB_URL:jdbc:h2:file:./data/publications;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE}
+    # WRITE_DELAY=0: write each save to disk straight away. H2's default holds changes in memory for
+    # up to a second, so a crash or power cut right after a save could lose it.
+    url: ${DB_URL:jdbc:h2:file:./data/publications;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE;WRITE_DELAY=0}
     driver-class-name: org.h2.Driver
     username: ${DB_USERNAME:sa}
     password: ${DB_PASSWORD:}

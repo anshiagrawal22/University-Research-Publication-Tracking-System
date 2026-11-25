@@ -6,6 +6,7 @@ import edu.university.portal.dto.CrossrefWork;
 import edu.university.portal.dto.OrcidWork;
 import edu.university.portal.exception.ExternalApiException;
 import edu.university.portal.repository.PublicationRepository;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,12 +21,19 @@ import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Service
 public class OrcidService {
@@ -45,6 +53,17 @@ public class OrcidService {
 
     private volatile String cachedToken;
     private volatile Instant tokenExpiresAt = Instant.EPOCH;
+
+    // Crossref allows 3 requests at once per client (header x-concurrency-limit) and refuses the rest
+    // with 429. Two at a time, shared by every import, stays under that even when someone is also
+    // looking up a single DOI on the submit page.
+    private static final int CROSSREF_PARALLELISM = 2;
+    private static final Duration ENRICHMENT_BUDGET = Duration.ofSeconds(20);
+    private final ExecutorService enrichmentPool = Executors.newFixedThreadPool(CROSSREF_PARALLELISM, runnable -> {
+        Thread thread = new Thread(runnable, "crossref-enrichment");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public OrcidService(
             RestTemplate orcidRestTemplate,
@@ -81,19 +100,21 @@ public class OrcidService {
         String researcherName = fetchResearcherName(orcidId, headers);
         List<String> fallbackAuthors = researcherName == null ? List.of() : List.of(researcherName);
 
-        List<OrcidWork> results = new ArrayList<>(summaries.size());
-        int enrichRemaining = maxCrossrefEnrichments;
-
+        // Look up the DOIs on Crossref two at a time instead of one by one, which roughly halves the
+        // wait for a large profile. The overall budget stops a slow
+        // Crossref from holding the import hostage: anything not back in time keeps its ORCID data.
+        Map<String, Future<CrossrefWork>> lookups = new LinkedHashMap<>();
         for (OrcidSummary item : summaries) {
-            CrossrefWork crossref = null;
-            if (item.doi() != null && enrichRemaining > 0) {
-                enrichRemaining--;
-                try {
-                    crossref = crossrefService.fetchByDoi(item.doi());
-                } catch (Exception ex) {
-                    log.debug("Crossref enrichment skipped for DOI {}: {}", item.doi(), ex.getMessage());
-                }
+            if (item.doi() != null && lookups.size() < maxCrossrefEnrichments && !lookups.containsKey(item.doi())) {
+                String doi = item.doi();
+                lookups.put(doi, enrichmentPool.submit(() -> crossrefService.fetchByDoi(doi)));
             }
+        }
+        long deadline = System.nanoTime() + ENRICHMENT_BUDGET.toNanos();
+
+        List<OrcidWork> results = new ArrayList<>(summaries.size());
+        for (OrcidSummary item : summaries) {
+            CrossrefWork crossref = item.doi() == null ? null : awaitEnrichment(item.doi(), lookups.get(item.doi()), deadline);
 
             String doi = crossref != null && crossref.doi() != null ? crossref.doi() : item.doi();
             String title = crossref != null && crossref.title() != null ? crossref.title() : item.title();
@@ -111,6 +132,33 @@ public class OrcidService {
         return results;
     }
 
+    private CrossrefWork awaitEnrichment(String doi, Future<CrossrefWork> lookup, long deadline) {
+        if (lookup == null) {
+            return null; // beyond the enrichment limit
+        }
+        long remaining = deadline - System.nanoTime();
+        try {
+            if (remaining <= 0) {
+                throw new TimeoutException();
+            }
+            return lookup.get(remaining, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException ex) {
+            lookup.cancel(true);
+            log.debug("Crossref enrichment for DOI {} ran out of time; keeping ORCID metadata", doi);
+        } catch (ExecutionException ex) {
+            log.debug("Crossref enrichment skipped for DOI {}: {}", doi, ex.getCause() == null ? ex.getMessage() : ex.getCause().getMessage());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            lookup.cancel(true);
+        }
+        return null;
+    }
+
+    @PreDestroy
+    void shutdownEnrichmentPool() {
+        enrichmentPool.shutdownNow();
+    }
+
     private String fetchJson(String url, String orcidId, HttpHeaders headers) {
         try {
             return restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class, orcidId).getBody();
@@ -118,9 +166,13 @@ public class OrcidService {
             if (ex.getStatusCode().value() == 404) {
                 throw new ExternalApiException("No ORCID record was found for " + orcidId, 404);
             }
-            throw new ExternalApiException("ORCID returned HTTP " + ex.getStatusCode().value(), 502);
+            throw new ExternalApiException("ORCID is having problems right now (error "
+                    + ex.getStatusCode().value() + "). Please try again in a few minutes.", 502);
         } catch (ResourceAccessException ex) {
-            throw new ExternalApiException("ORCID did not respond in time", 504);
+            if (CrossrefService.isTimeout(ex)) {
+                throw new ExternalApiException("ORCID did not respond in time. Please try again in a moment.", 504);
+            }
+            throw new ExternalApiException("Could not connect to ORCID. Check that the server has internet access, then try again.", 503);
         }
     }
 
@@ -150,13 +202,13 @@ public class OrcidService {
 
     private List<OrcidSummary> parseWorks(String json) {
         if (json == null || json.isBlank()) {
-            throw new ExternalApiException("ORCID returned an empty response", 502);
+            throw new ExternalApiException("ORCID sent back an empty response. Please try again later.", 502);
         }
         final JsonNode root;
         try {
             root = objectMapper.readTree(json);
         } catch (Exception ex) {
-            throw new ExternalApiException("ORCID returned an unreadable response", 502);
+            throw new ExternalApiException("ORCID sent back a response we couldn't read. Please try again later.", 502);
         }
 
         JsonNode groups = root.path("group");

@@ -21,7 +21,7 @@ RUN chown appuser:appgroup /app/app.jar
 
 USER appuser
 
-ENV DB_URL="jdbc:h2:file:/app/data/publications;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE"
+ENV DB_URL="jdbc:h2:file:/app/data/publications;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE;WRITE_DELAY=0"
 # The app defaults to 8081 for local dev (8080 is often taken); inside the container keep 8080.
 ENV SERVER_PORT=8080
 EXPOSE 8080

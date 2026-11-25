@@ -38,7 +38,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
                         WHERE (:applyStatus = false OR p2.status = :status)
                           AND (:applyDepartment = false OR LOWER(p2.department) = LOWER(:department))
                           AND (:applyFaculty = false OR EXISTS (
-                                SELECT af FROM p2.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                                SELECT af FROM p2.authors af WHERE LOWER(af) = LOWER(:faculty)
                           ))
                           AND (:applyYear = false OR p2.year = :year)
                           AND (:applyJournal = false OR LOWER(COALESCE(p2.journal, '')) LIKE LOWER(CONCAT('%', :journal, '%')))
@@ -56,7 +56,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
                         WHERE (:applyStatus = false OR p2.status = :status)
                           AND (:applyDepartment = false OR LOWER(p2.department) = LOWER(:department))
                           AND (:applyFaculty = false OR EXISTS (
-                                SELECT af FROM p2.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                                SELECT af FROM p2.authors af WHERE LOWER(af) = LOWER(:faculty)
                           ))
                           AND (:applyYear = false OR p2.year = :year)
                           AND (:applyJournal = false OR LOWER(COALESCE(p2.journal, '')) LIKE LOWER(CONCAT('%', :journal, '%')))
@@ -86,7 +86,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
               AND (:applyFaculty = false OR EXISTS (
-                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                    SELECT af FROM p.authors af WHERE LOWER(af) = LOWER(:faculty)
               ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
@@ -106,7 +106,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
               AND (:applyFaculty = false OR EXISTS (
-                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                    SELECT af FROM p.authors af WHERE LOWER(af) = LOWER(:faculty)
               ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
@@ -126,7 +126,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
               AND (:applyFaculty = false OR EXISTS (
-                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                    SELECT af FROM p.authors af WHERE LOWER(af) = LOWER(:faculty)
               ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
@@ -146,7 +146,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
               AND (:applyFaculty = false OR EXISTS (
-                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                    SELECT af FROM p.authors af WHERE LOWER(af) = LOWER(:faculty)
               ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
@@ -168,7 +168,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
               AND (:applyFaculty = false OR EXISTS (
-                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                    SELECT af FROM p.authors af WHERE LOWER(af) = LOWER(:faculty)
               ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
@@ -190,7 +190,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
               AND (:applyFaculty = false OR EXISTS (
-                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                    SELECT af FROM p.authors af WHERE LOWER(af) = LOWER(:faculty)
               ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)
@@ -212,7 +212,7 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
             WHERE p.status = edu.university.portal.model.PublicationStatus.VERIFIED
               AND (:applyDepartment = false OR LOWER(p.department) = LOWER(:department))
               AND (:applyFaculty = false OR EXISTS (
-                    SELECT af FROM p.authors af WHERE LOWER(af) LIKE LOWER(CONCAT('%', :faculty, '%'))
+                    SELECT af FROM p.authors af WHERE LOWER(af) = LOWER(:faculty)
               ))
               AND (:applyFrom = false OR p.year >= :fromYear)
               AND (:applyTo = false OR p.year <= :toYear)

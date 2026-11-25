@@ -180,6 +180,46 @@ class OrcidServiceTest {
     }
 
     @Test
+    void crossrefLookupsRunInParallelAndKeepOrcidOrder() {
+        StringBuilder groups = new StringBuilder();
+        for (int i = 1; i <= 6; i++) {
+            if (i > 1) groups.append(',');
+            groups.append("""
+                    { "work-summary": [ {
+                        "display-index": "0",
+                        "title": { "title": { "value": "Work %d" } },
+                        "publication-date": { "year": { "value": "2020" } },
+                        "external-ids": { "external-id": [ {
+                          "external-id-type": "doi", "external-id-value": "10.5555/work.%d", "external-id-relationship": "self"
+                        } ] }
+                    } ] }
+                    """.formatted(i, i));
+        }
+        server.expect(requestTo("https://pub.orcid.org/v3.0/0000-0002-1825-0097/works"))
+                .andRespond(withSuccess("{ \"group\": [" + groups + "] }", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://pub.orcid.org/v3.0/0000-0002-1825-0097/person"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        // Each Crossref lookup takes 300 ms. One after another that is 1.8 s; two at a time it is ~0.9 s.
+        when(crossrefService.fetchByDoi(org.mockito.ArgumentMatchers.anyString())).thenAnswer(call -> {
+            Thread.sleep(300);
+            String doi = call.getArgument(0);
+            return new CrossrefWork("Crossref title for " + doi, List.of("Author"), "Journal", 2020, doi);
+        });
+        when(publications.existsByDoiIgnoreCase(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+
+        long started = System.nanoTime();
+        List<OrcidWork> works = service.fetchWorks("0000-0002-1825-0097");
+        long tookMs = (System.nanoTime() - started) / 1_000_000;
+
+        assertThat(works).extracting(OrcidWork::doi)
+                .containsExactly("10.5555/work.1", "10.5555/work.2", "10.5555/work.3",
+                        "10.5555/work.4", "10.5555/work.5", "10.5555/work.6");
+        assertThat(works).allMatch(OrcidWork::enrichedFromCrossref);
+        assertThat(tookMs).isLessThan(1500);
+    }
+
+    @Test
     void notFoundOrcidThrowsCleanException() {
         server.expect(requestTo("https://pub.orcid.org/v3.0/0000-0000-0000-0000/works"))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));

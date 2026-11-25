@@ -94,6 +94,23 @@ class DashboardServiceTest {
                 .containsExactly("Biology");
     }
 
+    @Test
+    void facultyFilterMatchesTheWholeNameNotPartOfIt() {
+        // "A. Pai" is contained in "S. A. Pai" - the filter must not mix the two people up.
+        save("Paper by A Pai", PublicationStatus.VERIFIED, "Physics", currentYear, Instant.parse("2026-09-01T00:00:00Z"), "A. Pai");
+        save("Paper by S A Pai", PublicationStatus.VERIFIED, "Physics", currentYear, Instant.parse("2026-09-02T00:00:00Z"), "S. A. Pai");
+
+        assertThat(dashboardService.summary(null, "A. Pai", null, null).totalPublications()).isEqualTo(1);
+        assertThat(dashboardService.summary(null, "a. pai", null, null).totalPublications()).isEqualTo(1);
+        assertThat(dashboardService.recent(null, "A. Pai", null, null))
+                .extracting(row -> row.title())
+                .containsExactly("Paper by A Pai");
+        assertThat(publications.search(false, null, false, null, true, "A. Pai", false, 0, false, null, false, null,
+                        org.springframework.data.domain.PageRequest.of(0, 10)).getContent())
+                .extracting(Publication::getTitle)
+                .containsExactly("Paper by A Pai");
+    }
+
     private void save(String title, PublicationStatus status, String department, int year, Instant createdAt, String... authors) {
         Publication publication = new Publication();
         publication.setTitle(title);

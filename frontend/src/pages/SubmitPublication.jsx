@@ -67,6 +67,12 @@ const FIELD_LABELS = {
   doi: 'DOI',
 };
 
+// ['title', 'authors', 'year'] -> "title, authors and year"
+function listWords(words, joiner) {
+  if (words.length <= 1) return words.join('');
+  return `${words.slice(0, -1).join(', ')} ${joiner} ${words[words.length - 1]}`;
+}
+
 const STATUS_ICONS = {
   success: CircleCheck,
   error: CircleX,
@@ -117,6 +123,7 @@ export default function SubmitPublication() {
   const [fetching, setFetching] = useState(false);
   const [fetchStatus, setFetchStatus] = useState(null);
   const [fetchedMeta, setFetchedMeta] = useState(null);
+  const [fetchError, setFetchError] = useState(null);
   const [fieldOrigins, setFieldOrigins] = useState({});
   const [didFetch, setDidFetch] = useState(false);
   const [dupCheck, setDupCheck] = useState({ state: 'idle', exact: null, similar: [] });
@@ -198,36 +205,51 @@ export default function SubmitPublication() {
         department: 'manual',
       });
       setDidFetch(true);
+      // Only required fields count as "missing" (journal is optional).
+      const missing = [];
+      if (!data.title) missing.push('title');
+      if (!data.authors?.length) missing.push('authors');
+      if (!data.year) missing.push('year');
       setFetchedMeta({
         title: data.title || 'Not provided by Crossref',
         authors: data.authors?.length ? formatAuthors(data.authors, 6) : 'Not provided by Crossref',
         year: data.year ? String(data.year) : 'Not provided by Crossref',
         journal: data.journal || 'Not provided by Crossref',
+        missing,
       });
       setSource('CROSSREF');
       setFetchStatus('success');
+      setFetchError(null);
       setErrors((current) => ({ ...current, doi: undefined, title: undefined, authors: undefined, year: undefined }));
-      const missing = [];
-      if (!data.title) missing.push('title');
-      if (!data.authors?.length) missing.push('authors');
-      if (!data.year) missing.push('year');
       toast.push(
         'success',
         missing.length > 0
-          ? `Crossref details loaded (fill in missing ${missing.join(', ')} and department).`
+          ? `Crossref is missing the ${listWords(missing, 'and')}. Please fill ${missing.length > 1 ? 'them' : 'it'} in, choose a department, then submit.`
           : 'Details filled from Crossref. Choose a department, then submit.'
       );
     } catch (error) {
       const status = error?.response?.status;
       if (status === 404) {
         setFetchStatus('not_found');
+        setFetchError(null);
         toast.push('error', 'DOI not found');
-      } else if (!error?.response || status >= 500 || error?.code === 'ERR_NETWORK' || error?.code === 'ECONNABORTED') {
-        setFetchStatus('offline');
-        toast.push('error', 'Unable to connect to Crossref');
       } else {
-        setFetchStatus('offline');
-        toast.push('error', getErrorMessage(error, 'Unable to connect to Crossref'));
+        // Pick a heading that says what actually went wrong; the backend message carries the details.
+        let title = 'Could not look up this DOI';
+        let detail = getErrorMessage(error, 'Please try again, or enter the details by hand.');
+        if (!error?.response) {
+          title = "Can't reach the portal's server";
+          detail = "The backend isn't responding. Make sure it's running, then try again.";
+        } else if (status === 504) {
+          title = 'Crossref is taking too long';
+        } else if (status === 503) {
+          title = 'Unable to connect to Crossref';
+        } else if (status >= 500) {
+          title = 'Crossref is having problems';
+        }
+        setFetchStatus('failed');
+        setFetchError({ title, detail });
+        toast.push('error', title);
       }
     } finally {
       setFetching(false);
@@ -364,7 +386,11 @@ export default function SubmitPublication() {
       );
     } catch (error) {
       setOrcidWorks([]);
-      setOrcidError(getErrorMessage(error, 'ORCID works could not be retrieved.'));
+      setOrcidError(
+        error?.response
+          ? getErrorMessage(error, 'ORCID works could not be retrieved. Please try again.')
+          : "Can't reach the portal's server. Make sure the backend is running, then try again."
+      );
     } finally {
       setOrcidLoading(false);
     }
@@ -672,9 +698,9 @@ export default function SubmitPublication() {
               <span className="status-card-kicker">No Crossref record matched this DOI. You can still enter details manually.</span>
             </StatusCard>
           )}
-          {activeTab === 'doi' && fetchStatus === 'offline' && (
-            <StatusCard tone="error" title="Unable to connect to Crossref">
-              <span className="status-card-kicker">Check your connection, then try again or enter the details by hand.</span>
+          {activeTab === 'doi' && fetchStatus === 'failed' && fetchError && (
+            <StatusCard tone="error" title={fetchError.title}>
+              <span className="status-card-kicker">{fetchError.detail}</span>
             </StatusCard>
           )}
           {activeTab === 'doi' && fetchStatus === 'invalid' && (
@@ -683,8 +709,15 @@ export default function SubmitPublication() {
             </StatusCard>
           )}
           {activeTab === 'doi' && fetchStatus === 'success' && fetchedMeta && (
-            <StatusCard tone="success" title="Metadata fetched successfully">
-              <span className="status-card-kicker">Source: Crossref · DOI verified</span>
+            <StatusCard
+              tone={fetchedMeta.missing.length ? 'warning' : 'success'}
+              title={fetchedMeta.missing.length ? 'Some details are missing' : 'Metadata fetched successfully'}
+            >
+              <span className="status-card-kicker">
+                {fetchedMeta.missing.length
+                  ? `Crossref found this DOI but has no ${listWords(fetchedMeta.missing, 'or')}. Please fill ${fetchedMeta.missing.length > 1 ? 'them' : 'it'} in below.`
+                  : 'Source: Crossref · DOI verified'}
+              </span>
               <div className="status-card-meta">
                 <div><strong>Title:</strong> {fetchedMeta.title}</div>
                 <div><strong>Authors:</strong> {fetchedMeta.authors}</div>
