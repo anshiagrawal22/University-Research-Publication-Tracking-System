@@ -144,6 +144,26 @@ export async function publishPublication(id) {
 }
 
 // Retrieve verified publication totals and chart breakdowns for the dashboard.
+
+// Retrieve verified publication totals for the home page.
+export async function fetchDashboardSummary(signal) {
+  const { data } = await api.get('/api/dashboard/summary', { signal });
+  return data;
+}
+
+// Retrieve the latest verified publications.
+export async function fetchRecentPublications(signal) {
+  const { data } = await api.get('/api/dashboard/recent', { signal });
+  return data;
+}
+
+// Format authors for display.
+export function formatAuthors(authors) {
+  if (!Array.isArray(authors)) return '';
+  return authors.join(', ');
+}
+
+// Retrieve dashboard summary and chart breakdowns.
 export async function fetchDashboardData(params, signal) {
   const [summaryRes, deptRes, yearRes, facultyRes, recentRes] = await Promise.all([
     api.get('/api/dashboard/summary', { params, signal }),
@@ -152,6 +172,7 @@ export async function fetchDashboardData(params, signal) {
     api.get('/api/dashboard/by-faculty', { params, signal }),
     api.get('/api/dashboard/recent', { params, signal }),
   ]);
+
   return {
     summary: summaryRes.data,
     departments: deptRes.data,
