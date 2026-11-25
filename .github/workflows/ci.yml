@@ -1,0 +1,170 @@
+name: CI & Security Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-gates:
+    name: Security Gate — Static & Dependency Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js for dependency audit
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies for audit
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run repository security hygiene scan
+        run: bash scripts/security-scan.sh
+
+      - name: Run Trivy filesystem vulnerability and misconfiguration scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+  backend:
+    name: Backend Build & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Test and package backend
+        run: mvn -B -f backend/pom.xml clean verify
+
+      - name: Upload backend JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/publication-portal.jar
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload backend test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: backend/target/surefire-reports/
+          retention-days: 14
+
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload frontend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  docker-and-verify:
+    name: Docker Build, Container Scan & Live Gate Verify
+    needs: [security-gates, backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend and frontend Docker images
+        run: docker compose build
+
+      - name: Scan backend Docker image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: publication-portal-backend:latest
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      - name: Scan frontend Docker image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: publication-portal-frontend:latest
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      - name: Deploy containers and verify security gates
+        run: |
+          docker compose up -d
+          bash scripts/verify-deployment.sh
+
+      - name: Print container logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+
+      - name: Tear down verification containers
+        if: always()
+        run: docker compose down -v
+
+  trigger-jenkins:
+    name: Trigger Jenkins Pipeline
+    needs: [docker-and-verify]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Jenkins webhook if configured
+        env:
+          JENKINS_WEBHOOK_URL: ${{ secrets.JENKINS_WEBHOOK_URL }}
+          JENKINS_WEBHOOK_TOKEN: ${{ secrets.JENKINS_WEBHOOK_TOKEN }}
+        run: |
+          if [ -z "$JENKINS_WEBHOOK_URL" ]; then
+            echo "JENKINS_WEBHOOK_URL secret is not configured; skipping remote Jenkins webhook trigger."
+            exit 0
+          fi
+          if [ -n "$JENKINS_WEBHOOK_TOKEN" ]; then
+            curl -fsS -X POST -H "Authorization: Bearer ${JENKINS_WEBHOOK_TOKEN}" "${JENKINS_WEBHOOK_URL}"
+          else
+            curl -fsS -X POST "${JENKINS_WEBHOOK_URL}"
+          fi
