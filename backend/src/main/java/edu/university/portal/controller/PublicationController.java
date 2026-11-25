@@ -4,6 +4,7 @@ import edu.university.portal.dto.PageResponse;
 import edu.university.portal.dto.PublicationFiltersResponse;
 import edu.university.portal.dto.PublicationRequest;
 import edu.university.portal.dto.PublicationResponse;
+import edu.university.portal.dto.SecurityGateReport;
 import edu.university.portal.model.PublicationStatus;
 import edu.university.portal.service.PublicationService;
 import org.springframework.http.HttpStatus;
@@ -61,6 +62,16 @@ public class PublicationController {
     @PutMapping("/{id}")
     public PublicationResponse update(@PathVariable Long id, @RequestBody PublicationRequest request) {
         return publicationService.update(id, request);
+    }
+
+    @GetMapping("/{id}/security-gate")
+    public SecurityGateReport securityGate(@PathVariable Long id) {
+        return publicationService.evaluateSecurityGate(id);
+    }
+
+    @PostMapping("/{id}/publish")
+    public PublicationResponse publish(@PathVariable Long id) {
+        return publicationService.publish(id);
     }
 
     @DeleteMapping("/{id}")

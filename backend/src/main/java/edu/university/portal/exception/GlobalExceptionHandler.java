@@ -25,6 +25,11 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Validation failed", request, ex.getFieldErrors());
     }
 
+    @ExceptionHandler(SecurityGateException.class)
+    public ResponseEntity<ApiError> securityGate(SecurityGateException ex, HttpServletRequest request) {
+        return error(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage(), request, ex.getFieldErrors());
+    }
+
     @ExceptionHandler(DuplicateDoiException.class)
     public ResponseEntity<ApiError> duplicate(DuplicateDoiException ex, HttpServletRequest request) {
         return error(

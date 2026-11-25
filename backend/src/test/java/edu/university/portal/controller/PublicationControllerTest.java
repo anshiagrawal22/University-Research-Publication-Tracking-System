@@ -4,11 +4,15 @@ import edu.university.portal.dto.FieldErrorItem;
 import edu.university.portal.dto.PageResponse;
 import edu.university.portal.dto.PublicationFiltersResponse;
 import edu.university.portal.dto.PublicationResponse;
+import edu.university.portal.dto.SecurityGateCheck;
+import edu.university.portal.dto.SecurityGateReport;
 import edu.university.portal.exception.DuplicateDoiException;
 import edu.university.portal.exception.GlobalExceptionHandler;
+import edu.university.portal.exception.SecurityGateException;
 import edu.university.portal.exception.ValidationException;
 import edu.university.portal.model.PublicationSource;
 import edu.university.portal.model.PublicationStatus;
+import edu.university.portal.model.SecurityGateStatus;
 import edu.university.portal.service.PublicationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -164,6 +168,38 @@ class PublicationControllerTest {
         mockMvc.perform(delete("/api/publications/7"))
                 .andExpect(status().isNoContent());
         verify(publicationService).delete(7L);
+    }
+
+    @Test
+    void securityGateAndPublishEndpointsWork() throws Exception {
+        SecurityGateReport report = new SecurityGateReport(
+                SecurityGateStatus.PASSED,
+                true,
+                Instant.parse("2026-03-01T00:00:00Z"),
+                "All 4 security gates passed",
+                List.of(new SecurityGateCheck("INPUT_SECURITY", "Input & XSS Sanitization", SecurityGateStatus.PASSED, "Clean"))
+        );
+        when(publicationService.evaluateSecurityGate(7L)).thenReturn(report);
+        when(publicationService.publish(7L)).thenReturn(sample());
+        when(publicationService.publish(8L)).thenThrow(new SecurityGateException(
+                "Security gate blocked publication from going live",
+                new SecurityGateReport(SecurityGateStatus.FAILED, false, Instant.now(), "Blocked", List.of()),
+                List.of(new FieldErrorItem("status", "Blocked"))
+        ));
+
+        mockMvc.perform(get("/api/publications/7/security-gate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.overallStatus").value("PASSED"))
+                .andExpect(jsonPath("$.publishAllowed").value(true));
+
+        mockMvc.perform(post("/api/publications/7/publish"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("VERIFIED"));
+
+        mockMvc.perform(post("/api/publications/8/publish"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("status"));
     }
 
     private PublicationResponse sample() {

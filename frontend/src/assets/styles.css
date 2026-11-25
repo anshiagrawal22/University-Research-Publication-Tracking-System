@@ -397,9 +397,24 @@ input::placeholder { color: #5B6770; }
 }
 .search-input-wrap input { padding-left: 36px; }
 
-.actions-col { width: 100px; text-align: right; }
+.actions-col { width: 132px; text-align: right; }
 .actions-cell { text-align: right; }
 .row-actions { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.status-stack { display: grid; gap: 4px; justify-items: start; }
+.gate-sub { font-size: 0.78rem; color: var(--muted); }
+.gate-modal-meta { display: grid; gap: 8px; margin-bottom: 14px; }
+.gate-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 10px; }
+.gate-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #FCFBF8;
+  display: grid;
+  gap: 4px;
+}
+.gate-item-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.gate-item p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+.icon-button-gate:hover { border-color: #2F5D4A; color: #1E3D32; background: #E4EFE8; }
 
 .modal-backdrop {
   position: fixed;

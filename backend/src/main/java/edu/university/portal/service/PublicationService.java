@@ -5,8 +5,10 @@ import edu.university.portal.dto.PageResponse;
 import edu.university.portal.dto.PublicationFiltersResponse;
 import edu.university.portal.dto.PublicationRequest;
 import edu.university.portal.dto.PublicationResponse;
+import edu.university.portal.dto.SecurityGateReport;
 import edu.university.portal.exception.DuplicateDoiException;
 import edu.university.portal.exception.ResourceNotFoundException;
+import edu.university.portal.exception.SecurityGateException;
 import edu.university.portal.exception.ValidationException;
 import edu.university.portal.model.Publication;
 import edu.university.portal.model.PublicationStatus;
@@ -26,18 +28,28 @@ public class PublicationService {
 
     private final PublicationRepository publications;
     private final ValidationService validationService;
+    private final SecurityGateService securityGateService;
 
-    public PublicationService(PublicationRepository publications, ValidationService validationService) {
+    public PublicationService(
+            PublicationRepository publications,
+            ValidationService validationService,
+            SecurityGateService securityGateService
+    ) {
         this.publications = publications;
         this.validationService = validationService;
+        this.securityGateService = securityGateService;
     }
 
-    // Save the publication after validating required fields and checking for duplicate DOIs.
+    // Validate fields, run security gates, and stage new submissions before they go live.
     @Transactional
     public PublicationResponse create(PublicationRequest request) {
         Publication publication = new Publication();
         validationService.validateAndApply(request, publication, null);
-        publication.setStatus(PublicationStatus.VERIFIED);
+        securityGateService.assertInputSafe(publication);
+
+        SecurityGateReport report = securityGateService.evaluate(publication, null);
+        securityGateService.applyReport(publication, report);
+        publication.setStatus(report.publishAllowed() ? PublicationStatus.IN_REVIEW : PublicationStatus.REJECTED);
         publication.setCreatedAt(Instant.now());
 
         try {
@@ -102,8 +114,22 @@ public class PublicationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Publication " + id + " was not found"));
 
         validationService.validateAndApply(request, existing, id);
+        securityGateService.assertInputSafe(existing);
+
+        SecurityGateReport report = securityGateService.evaluate(existing, id);
+        securityGateService.applyReport(existing, report);
+
         if (request != null && request.status() != null) {
+            if (request.status() == PublicationStatus.VERIFIED && !report.publishAllowed()) {
+                throw new SecurityGateException(
+                        "Security gate blocked publication from going live: " + report.summary(),
+                        report,
+                        List.of(new FieldErrorItem("status", report.summary()))
+                );
+            }
             existing.setStatus(request.status());
+        } else if (!report.publishAllowed()) {
+            existing.setStatus(PublicationStatus.REJECTED);
         }
 
         try {
@@ -111,6 +137,40 @@ public class PublicationService {
         } catch (DataIntegrityViolationException ex) {
             throw new DuplicateDoiException(existing.getDoi());
         }
+    }
+
+    // Run all security gates on an existing record and return the detailed inspection report.
+    @Transactional
+    public SecurityGateReport evaluateSecurityGate(Long id) {
+        Publication existing = publications.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Publication " + id + " was not found"));
+        SecurityGateReport report = securityGateService.evaluate(existing, id);
+        securityGateService.applyReport(existing, report);
+        publications.save(existing);
+        return report;
+    }
+
+    // Gate-protected publish transition: only papers passing all security gates can go live.
+    @Transactional(noRollbackFor = SecurityGateException.class)
+    public PublicationResponse publish(Long id) {
+        Publication existing = publications.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Publication " + id + " was not found"));
+
+        SecurityGateReport report = securityGateService.evaluate(existing, id);
+        securityGateService.applyReport(existing, report);
+
+        if (!report.publishAllowed()) {
+            existing.setStatus(PublicationStatus.REJECTED);
+            publications.save(existing);
+            throw new SecurityGateException(
+                    "Security gate blocked publication from going live: " + report.summary(),
+                    report,
+                    List.of(new FieldErrorItem("status", report.summary()))
+            );
+        }
+
+        existing.setStatus(PublicationStatus.VERIFIED);
+        return PublicationResponse.from(publications.save(existing));
     }
 
     @Transactional

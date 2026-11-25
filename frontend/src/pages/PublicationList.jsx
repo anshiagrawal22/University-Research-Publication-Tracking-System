@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Pencil, Search, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Pencil, Search, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react';
 import {
   deletePublication,
   DEPARTMENTS,
   fetchFilterOptions,
   fetchPublications,
+  fetchSecurityGateReport,
   getErrorMessage,
+  publishPublication,
   updatePublication,
   validatePublicationFields,
 } from '../services/publicationApi';
@@ -22,6 +24,18 @@ const STATUS_LABELS = {
   VERIFIED: 'Verified',
   IN_REVIEW: 'In review',
   REJECTED: 'Rejected',
+};
+
+const GATE_LABELS = {
+  PASSED: 'Gate passed',
+  WARN: 'Gate warning',
+  FAILED: 'Gate blocked',
+};
+
+const GATE_CHIP_CLASS = {
+  PASSED: 'chip-verified',
+  WARN: 'chip-in_review',
+  FAILED: 'chip-rejected',
 };
 
 export default function PublicationList() {
@@ -50,6 +64,10 @@ export default function PublicationList() {
 
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+
+  const [gateModal, setGateModal] = useState(null);
+  const [gateLoading, setGateLoading] = useState(false);
+  const [publishingGate, setPublishingGate] = useState(false);
 
   // Debounce free-text search to avoid querying the API on every keystroke.
   useEffect(() => {
@@ -183,6 +201,48 @@ export default function PublicationList() {
     }
   }
 
+  async function openSecurityGate(row) {
+    setConfirmDeleteId(null);
+    setGateModal({ publication: row, report: null, error: '' });
+    setGateLoading(true);
+    try {
+      const report = await fetchSecurityGateReport(row.id);
+      setGateModal({ publication: row, report, error: '' });
+      setReload((current) => current + 1);
+    } catch (err) {
+      setGateModal({
+        publication: row,
+        report: null,
+        error: getErrorMessage(err, 'Could not run security gate checks.'),
+      });
+    } finally {
+      setGateLoading(false);
+    }
+  }
+
+  async function handlePublishFromGate() {
+    if (!gateModal?.publication) return;
+    setPublishingGate(true);
+    try {
+      const updated = await publishPublication(gateModal.publication.id);
+      toast.push('success', 'Security gates cleared. Publication is now live on the website.');
+      setGateModal(null);
+      setReload((current) => current + 1);
+      return updated;
+    } catch (err) {
+      toast.push('error', getErrorMessage(err, 'Security gate blocked publication from going live.'));
+      try {
+        const refreshed = await fetchSecurityGateReport(gateModal.publication.id);
+        setGateModal((curr) => (curr ? { ...curr, report: refreshed } : curr));
+        setReload((current) => current + 1);
+      } catch {
+        // Keep existing modal error context
+      }
+    } finally {
+      setPublishingGate(false);
+    }
+  }
+
   return (
     <div>
       <p className="eyebrow">Register</p>
@@ -281,9 +341,16 @@ export default function PublicationList() {
                     <td data-label="Department"><span className="tag">{row.department}</span></td>
                     <td data-label="Year">{row.year}</td>
                     <td data-label="Status">
-                      <span className={`chip chip-${statusKey.toLowerCase()}`}>
-                        {STATUS_LABELS[statusKey] || statusKey}
-                      </span>
+                      <div className="status-stack">
+                        <span className={`chip chip-${statusKey.toLowerCase()}`}>
+                          {STATUS_LABELS[statusKey] || statusKey}
+                        </span>
+                        {row.gateStatus && (
+                          <span className="gate-sub">
+                            {GATE_LABELS[row.gateStatus] || row.gateStatus}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td data-label="Actions" className="actions-cell">
                       {confirmDeleteId === row.id ? (
@@ -307,6 +374,19 @@ export default function PublicationList() {
                         </div>
                       ) : (
                         <div className="row-actions">
+                          <button
+                            type="button"
+                            className="icon-button icon-button-gate"
+                            aria-label={`Security gate for ${row.title}`}
+                            title="Security gate & publish"
+                            onClick={() => openSecurityGate(row)}
+                          >
+                            {row.gateStatus === 'FAILED' ? (
+                              <ShieldAlert size={15} strokeWidth={1.6} aria-hidden="true" />
+                            ) : (
+                              <ShieldCheck size={15} strokeWidth={1.6} aria-hidden="true" />
+                            )}
+                          </button>
                           <button
                             type="button"
                             className="icon-button"
@@ -468,6 +548,97 @@ export default function PublicationList() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {gateModal && (
+        <div className="modal-backdrop" role="presentation" onClick={() => !publishingGate && setGateModal(null)}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gate-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="gate-modal-title">Pre-publish Security Gate</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close dialog"
+                disabled={publishingGate}
+                onClick={() => setGateModal(null)}
+              >
+                <X size={18} strokeWidth={1.6} />
+              </button>
+            </div>
+
+            <div className="gate-modal-meta">
+              <strong>{gateModal.publication.title}</strong>
+              <p className="cell-sub">
+                Current status: {STATUS_LABELS[gateModal.publication.status] || gateModal.publication.status}
+              </p>
+            </div>
+
+            {gateLoading ? (
+              <div className="skeleton-stack">
+                <div className="skeleton skeleton-row" />
+                <div className="skeleton skeleton-row" />
+              </div>
+            ) : gateModal.error ? (
+              <div className="banner banner-error" role="alert">
+                <p>{gateModal.error}</p>
+              </div>
+            ) : gateModal.report ? (
+              <>
+                <div
+                  className={`banner ${gateModal.report.publishAllowed ? 'banner-success' : 'banner-error'}`}
+                  role="status"
+                >
+                  <p>
+                    <strong>{GATE_LABELS[gateModal.report.overallStatus] || gateModal.report.overallStatus}:</strong>{' '}
+                    {gateModal.report.summary}
+                  </p>
+                </div>
+
+                <ul className="gate-list">
+                  {gateModal.report.checks.map((check) => (
+                    <li key={check.gate} className="gate-item">
+                      <div className="gate-item-head">
+                        <strong>{check.label}</strong>
+                        <span className={`chip ${GATE_CHIP_CLASS[check.status] || 'chip-in_review'}`}>
+                          {check.status}
+                        </span>
+                      </div>
+                      <p>{check.message}</p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={gateLoading || publishingGate}
+                onClick={() => openSecurityGate(gateModal.publication)}
+              >
+                Re-run checks
+              </button>
+              {gateModal.publication.status !== 'VERIFIED' && (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={gateLoading || publishingGate || !gateModal.report?.publishAllowed}
+                  onClick={handlePublishFromGate}
+                >
+                  <CheckCircle2 size={15} strokeWidth={1.8} style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                  {publishingGate ? 'Publishing…' : 'Approve & Publish Live'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

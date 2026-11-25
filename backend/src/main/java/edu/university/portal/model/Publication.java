@@ -63,6 +63,16 @@ public class Publication {
     @Column(nullable = false, length = 20)
     private PublicationStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "gate_status", length = 20)
+    private SecurityGateStatus gateStatus;
+
+    @Column(name = "gate_summary", length = 1000)
+    private String gateSummary;
+
+    @Column(name = "gate_checked_at")
+    private Instant gateCheckedAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -151,6 +161,30 @@ public class Publication {
 
     public void setStatus(PublicationStatus status) {
         this.status = status;
+    }
+
+    public SecurityGateStatus getGateStatus() {
+        return gateStatus;
+    }
+
+    public void setGateStatus(SecurityGateStatus gateStatus) {
+        this.gateStatus = gateStatus;
+    }
+
+    public String getGateSummary() {
+        return gateSummary;
+    }
+
+    public void setGateSummary(String gateSummary) {
+        this.gateSummary = gateSummary;
+    }
+
+    public Instant getGateCheckedAt() {
+        return gateCheckedAt;
+    }
+
+    public void setGateCheckedAt(Instant gateCheckedAt) {
+        this.gateCheckedAt = gateCheckedAt;
     }
 
     public Instant getCreatedAt() {

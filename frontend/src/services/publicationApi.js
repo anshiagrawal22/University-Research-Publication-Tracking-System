@@ -133,6 +133,16 @@ export async function deletePublication(id) {
   await api.delete(`/api/publications/${id}`);
 }
 
+export async function fetchSecurityGateReport(id) {
+  const { data } = await api.get(`/api/publications/${id}/security-gate`);
+  return data;
+}
+
+export async function publishPublication(id) {
+  const { data } = await api.post(`/api/publications/${id}/publish`);
+  return data;
+}
+
 // Retrieve verified publication totals and chart breakdowns for the dashboard.
 export async function fetchDashboardData(params, signal) {
   const [summaryRes, deptRes, yearRes, facultyRes, recentRes] = await Promise.all([

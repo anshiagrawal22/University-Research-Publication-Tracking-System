@@ -3,6 +3,7 @@ package edu.university.portal.config;
 import edu.university.portal.model.Publication;
 import edu.university.portal.model.PublicationSource;
 import edu.university.portal.model.PublicationStatus;
+import edu.university.portal.model.SecurityGateStatus;
 import edu.university.portal.repository.PublicationRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,8 +88,18 @@ public class PublicationDataSeeder implements CommandLineRunner {
             publication.setJournal(parts[5].isBlank() ? null : parts[5]);
             publication.setOrcidId(parts[6].isBlank() ? null : parts[6]);
             publication.setSource(PublicationSource.valueOf(parts[7]));
-            publication.setStatus(PublicationStatus.valueOf(parts[8]));
-            publication.setCreatedAt(newest.minus(Duration.ofHours(i * 8L)));
+            PublicationStatus status = PublicationStatus.valueOf(parts[8]);
+            publication.setStatus(status);
+            Instant createdAt = newest.minus(Duration.ofHours(i * 8L));
+            publication.setCreatedAt(createdAt);
+            publication.setGateCheckedAt(createdAt);
+            if (status == PublicationStatus.REJECTED) {
+                publication.setGateStatus(SecurityGateStatus.FAILED);
+                publication.setGateSummary("Blocked — Venue & Release Policy: matched restricted venue term 'unreviewed preprint'");
+            } else {
+                publication.setGateStatus(SecurityGateStatus.PASSED);
+                publication.setGateSummary("All 4 security gates passed");
+            }
             batch.add(publication);
         }
         publications.saveAll(batch);

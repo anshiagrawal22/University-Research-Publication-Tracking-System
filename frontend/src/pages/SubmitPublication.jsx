@@ -99,7 +99,7 @@ export default function SubmitPublication() {
 
     setSaving(true);
     try {
-      await createPublication({
+      const created = await createPublication({
         title: form.title.trim(),
         authors,
         doi: doi || null,
@@ -108,7 +108,11 @@ export default function SubmitPublication() {
         journal: form.journal.trim() || null,
         source,
       });
-      toast.push('success', 'Publication added to the register.');
+      if (created.status === 'REJECTED') {
+        toast.push('error', 'Submitted, but blocked by the pre-publish Security Gate. Inspect findings in the register.');
+      } else {
+        toast.push('success', 'Submitted to Security Gate review. Clear and publish it from the register to go live.');
+      }
       navigate('/publications');
     } catch (error) {
       const data = error?.response?.data;
@@ -264,7 +268,7 @@ export default function SubmitPublication() {
     setImportSummary({ importedCount, duplicateCount, failedCount });
 
     if (importedCount > 0 && failedCount === 0 && duplicateCount === 0) {
-      toast.push('success', `Imported ${importedCount} publication(s) into the register.`);
+      toast.push('success', `Imported ${importedCount} publication(s) into Security Gate review.`);
     } else if (importedCount > 0) {
       toast.push('success', `Imported ${importedCount}; ${duplicateCount} duplicate(s), ${failedCount} failed.`);
     } else {

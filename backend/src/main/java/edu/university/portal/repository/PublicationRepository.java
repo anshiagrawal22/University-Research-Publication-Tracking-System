@@ -16,6 +16,10 @@ public interface PublicationRepository extends JpaRepository<Publication, Long> 
 
     boolean existsByDoiIgnoreCaseAndIdNot(String doi, Long id);
 
+    boolean existsByTitleIgnoreCaseAndYear(String title, Integer year);
+
+    boolean existsByTitleIgnoreCaseAndYearAndIdNot(String title, Integer year, Long id);
+
     @Query("SELECT DISTINCT p.department FROM Publication p ORDER BY p.department ASC")
     List<String> findDistinctDepartments();
 
