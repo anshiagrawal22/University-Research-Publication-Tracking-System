@@ -42,6 +42,14 @@ export function cleanDoi(raw) {
   return doi;
 }
 
+// Display helper: large collaborations can list 1,000+ authors, so show the first few
+// and summarise the rest ("A, B, C + 1,009 more"). Use the full list for editing/saving.
+export function formatAuthors(authors, max = 3) {
+  const list = (authors || []).filter(Boolean);
+  if (list.length <= max + 1) return list.join(', ');
+  return `${list.slice(0, max).join(', ')} + ${(list.length - max).toLocaleString()} more`;
+}
+
 export function isValidDoi(doi) {
   return /^10\.\d{4,9}\/\S+$/.test(doi);
 }
@@ -76,15 +84,15 @@ export function validatePublicationFields(values) {
   const errors = {};
   if (!values.title.trim()) errors.title = 'Title is required';
   const authors = values.authors.split(',').map((name) => name.trim()).filter(Boolean);
-  if (authors.length === 0) errors.authors = 'At least one author is required';
+  if (authors.length === 0) errors.authors = 'Authors are required';
   const yearNum = Number(values.year);
-  if (!values.year) errors.year = 'Year is required';
+  if (!values.year) errors.year = 'Valid publication year required';
   else if (!Number.isInteger(yearNum) || yearNum < 1900 || yearNum > 2100) {
-    errors.year = 'Year must be a whole number between 1900 and 2100';
+    errors.year = 'Valid publication year required';
   }
-  if (!values.department) errors.department = 'Department is required';
+  if (!values.department) errors.department = 'Department must be selected';
   const doi = cleanDoi(values.doi);
-  if (doi && !isValidDoi(doi)) errors.doi = 'DOI must look like 10.xxxx/suffix';
+  if (doi && !isValidDoi(doi)) errors.doi = 'DOI format is invalid';
   return { errors, authors, doi, yearNum };
 }
 
@@ -105,6 +113,83 @@ export async function fetchOrcidWorks(orcidId) {
 export async function fetchPublications(params, signal) {
   const { data } = await api.get('/api/publications', { params, signal });
   return data;
+}
+
+const TITLE_STOPWORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'by', 'for', 'from', 'in', 'into', 'is', 'of', 'on',
+  'or', 'the', 'to', 'with', 'via', 'using', 'its', 'their', 'towards', 'toward', 'based',
+]);
+
+// Lowercase, strip punctuation and collapse whitespace so titles compare reliably.
+export function normalizeTitle(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function titleTokens(title) {
+  return normalizeTitle(title)
+    .split(' ')
+    .filter((word) => word.length > 1 && !TITLE_STOPWORDS.has(word));
+}
+
+// Dice coefficient over significant title words (0 = unrelated, 1 = same words).
+export function titleSimilarity(a, b) {
+  const left = new Set(titleTokens(a));
+  const right = new Set(titleTokens(b));
+  if (left.size === 0 || right.size === 0) return 0;
+  let shared = 0;
+  left.forEach((word) => {
+    if (right.has(word)) shared++;
+  });
+  return (2 * shared) / (left.size + right.size);
+}
+
+export const SIMILAR_TITLE_THRESHOLD = 0.6;
+
+// Check existing records for an exact duplicate (same DOI or same title) and similar titles.
+// Uses the existing list/search endpoint, so no backend changes are required.
+export async function findDuplicateCandidates({ doi, title, excludeId } = {}, signal) {
+  const cleanedDoi = doi && isValidDoi(cleanDoi(doi)) ? cleanDoi(doi) : '';
+  const trimmedTitle = String(title || '').trim();
+  const queries = new Set();
+  if (cleanedDoi) queries.add(cleanedDoi);
+  if (trimmedTitle) {
+    queries.add(trimmedTitle);
+    // Also search on the most distinctive words so reworded titles are still found.
+    [...new Set(titleTokens(trimmedTitle))]
+      .sort((a, b) => b.length - a.length)
+      .slice(0, 2)
+      .filter((word) => word.length >= 4)
+      .forEach((word) => queries.add(word));
+  }
+  if (queries.size === 0) return { exact: null, similar: [] };
+
+  const pages = await Promise.all(
+    [...queries].map((search) => fetchPublications({ search, size: 50, page: 0 }, signal))
+  );
+  const byId = new Map();
+  pages.forEach((page) => (page?.content || []).forEach((row) => byId.set(row.id, row)));
+  if (excludeId != null) byId.delete(excludeId);
+
+  const normalized = normalizeTitle(trimmedTitle);
+  let exact = null;
+  const similar = [];
+  byId.forEach((row) => {
+    const sameDoi = cleanedDoi && row.doi && cleanDoi(row.doi) === cleanedDoi;
+    const sameTitle = normalized && normalizeTitle(row.title) === normalized;
+    if (sameDoi || sameTitle) {
+      if (!exact || sameDoi) exact = { ...row, matchedOn: sameDoi ? 'doi' : 'title' };
+      return;
+    }
+    if (trimmedTitle) {
+      const score = titleSimilarity(trimmedTitle, row.title);
+      if (score >= SIMILAR_TITLE_THRESHOLD) similar.push({ ...row, score });
+    }
+  });
+  similar.sort((a, b) => b.score - a.score);
+  return { exact, similar: similar.slice(0, 3) };
 }
 
 // Load distinct filter dropdown options from the database and merge default departments.
@@ -131,6 +216,17 @@ export async function updatePublication(id, payload) {
 
 export async function deletePublication(id) {
   await api.delete(`/api/publications/${id}`);
+}
+
+// Lightweight calls used by the home page overview.
+export async function fetchDashboardSummary(signal) {
+  const { data } = await api.get('/api/dashboard/summary', { signal });
+  return data;
+}
+
+export async function fetchRecentPublications(signal) {
+  const { data } = await api.get('/api/dashboard/recent', { signal });
+  return data;
 }
 
 // Retrieve verified publication totals and chart breakdowns for the dashboard.

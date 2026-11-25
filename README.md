@@ -21,7 +21,7 @@ mvn clean test package
 mvn spring-boot:run
 ```
 
-The API listens on `http://localhost:8080` by default (override with `--server.port=8082` if port `8080` is occupied).
+The API listens on `http://localhost:8081` by default (port `8080` is often taken by other local tools such as Jenkins). Override it with the `SERVER_PORT` environment variable or `--server.port=8082`.
 
 - **Database:** File-backed H2 (`./data/publications`) persists records across restarts (`DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, and `JPA_DDL_AUTO` can override defaults).
 - **Seed data:** The `dev` profile is active by default and seeds 30 sample publications only when the database is empty (`app.seed.enabled=true`). Tests run with the `test` profile against an isolated in-memory database.
@@ -42,7 +42,7 @@ cd frontend
 npm run build
 ```
 
-The portal listens on `http://localhost:5173` and proxies `/api` to `http://localhost:8080` (or set `VITE_API_URL` if running the backend on another port).
+The portal listens on `http://localhost:5173` and proxies `/api` to `http://localhost:8081`. If the backend runs on another port, start the dev server with `BACKEND_URL=http://localhost:<port>` (or set `VITE_API_URL` to call the API directly).
 
 ## API
 

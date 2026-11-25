@@ -1,5 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  CircleCheck,
+  CircleDashed,
+  CircleX,
+  IdCard,
+  Link2,
+  LoaderCircle,
+  PenLine,
+  TriangleAlert,
+} from 'lucide-react';
 import {
   cleanDoi,
   cleanOrcid,
@@ -7,12 +17,15 @@ import {
   DEPARTMENTS,
   fetchOrcidWorks,
   fetchPublicationByDoi,
+  findDuplicateCandidates,
+  formatAuthors,
   getErrorMessage,
   isValidDoi,
   isValidOrcid,
   validatePublicationFields,
 } from '../services/publicationApi';
 import { useToast } from '../components/Toast';
+import Select from '../components/Select';
 
 const EMPTY = {
   title: '',
@@ -23,16 +36,91 @@ const EMPTY = {
   journal: '',
 };
 
+const MODES = [
+  {
+    id: 'doi',
+    label: 'Fetch using DOI',
+    icon: Link2,
+    description: 'Paste a DOI and the details are filled in from Crossref. Review them, choose a department, then submit.',
+  },
+  {
+    id: 'orcid',
+    label: 'Import from ORCID',
+    icon: IdCard,
+    description: 'Enter an ORCID iD to list a researcher’s public works and import several at once.',
+  },
+  {
+    id: 'manual',
+    label: 'Enter manually',
+    icon: PenLine,
+    description: 'Type the publication details yourself. A DOI is optional.',
+  },
+];
+
+const DEPARTMENT_OPTIONS = DEPARTMENTS.map((department) => ({ value: department, label: department }));
+
+const FIELD_LABELS = {
+  title: 'Title',
+  authors: 'Authors',
+  year: 'Publication year',
+  department: 'Department',
+  doi: 'DOI',
+};
+
+const STATUS_ICONS = {
+  success: CircleCheck,
+  error: CircleX,
+  warning: TriangleAlert,
+  info: LoaderCircle,
+  pending: CircleDashed,
+};
+
+function StatusCard({ tone, title, children, role }) {
+  const Icon = STATUS_ICONS[tone] || CircleCheck;
+  return (
+    <div className={`status-card status-card-${tone}`} role={role || (tone === 'error' ? 'alert' : 'status')}>
+      <div className="status-card-title">
+        <Icon size={18} strokeWidth={1.8} aria-hidden="true" className={tone === 'info' ? 'spin' : undefined} />
+        <strong>{title}</strong>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function CheckRow({ tone, title, detail }) {
+  const Icon = STATUS_ICONS[tone] || CircleDashed;
+  return (
+    <li className={`check-row check-row-${tone}`}>
+      <Icon size={18} strokeWidth={1.8} aria-hidden="true" className={tone === 'info' ? 'spin' : undefined} />
+      <div>
+        <strong>{title}</strong>
+        {detail && <span className="check-row-detail">{detail}</span>}
+      </div>
+    </li>
+  );
+}
+
 export default function SubmitPublication() {
   const toast = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('mode') === 'orcid' ? 'orcid' : 'manual';
+  const requestedMode = searchParams.get('mode');
+  const activeTab = MODES.some((mode) => mode.id === requestedMode) ? requestedMode : 'doi';
+  const activeMode = MODES.find((mode) => mode.id === activeTab);
 
   const [form, setForm] = useState(EMPTY);
   const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [source, setSource] = useState('FORM');
   const [fetching, setFetching] = useState(false);
+  const [fetchStatus, setFetchStatus] = useState(null);
+  const [fetchedMeta, setFetchedMeta] = useState(null);
+  const [fieldOrigins, setFieldOrigins] = useState({});
+  const [didFetch, setDidFetch] = useState(false);
+  const [dupCheck, setDupCheck] = useState({ state: 'idle', exact: null, similar: [] });
+  const dupRequestId = useRef(0);
   const [saving, setSaving] = useState(false);
 
   const [orcidInput, setOrcidInput] = useState('');
@@ -46,22 +134,51 @@ export default function SubmitPublication() {
   const [importSummary, setImportSummary] = useState(null);
 
   function switchTab(mode) {
-    setSearchParams(mode === 'orcid' ? { mode: 'orcid' } : {});
+    setSearchParams(mode === 'doi' ? {} : { mode });
+  }
+
+  function markTouched(field) {
+    setTouched((current) => (current[field] ? current : { ...current, [field]: true }));
   }
 
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
+    if (didFetch) {
+      setFieldOrigins((current) => ({ ...current, [field]: 'manual' }));
+    }
+  }
+
+  function originLabel(field) {
+    if (!didFetch) return null;
+    const origin = fieldOrigins[field];
+    if (origin === 'manual' && !String(form[field] || '').trim()) return null;
+    if (origin === 'crossref') return 'Fetched from Crossref';
+    if (origin === 'orcid') return 'Imported from ORCID';
+    if (origin === 'manual') return 'Manually entered';
+    return null;
+  }
+
+  function applyCleanedDoi(raw) {
+    const cleaned = cleanDoi(raw);
+    if (cleaned && isValidDoi(cleaned) && cleaned !== raw.trim().toLowerCase()) {
+      return cleaned;
+    }
+    return raw;
   }
 
   // Fetch publication details using DOI and populate form fields.
   async function handleDoiLookup() {
     const doi = cleanDoi(form.doi);
+    if (!doi) return;
     if (!isValidDoi(doi)) {
-      setErrors((current) => ({ ...current, doi: 'Enter a DOI such as 10.1038/nature12373' }));
+      setErrors((current) => ({ ...current, doi: 'DOI format is invalid' }));
+      setFetchStatus('invalid');
       return;
     }
+    setForm((current) => ({ ...current, doi }));
     setFetching(true);
+    setFetchStatus('loading');
     try {
       const data = await fetchPublicationByDoi(doi);
       setForm((current) => ({
@@ -72,7 +189,23 @@ export default function SubmitPublication() {
         journal: data.journal || current.journal,
         year: data.year ? String(data.year) : current.year,
       }));
+      setFieldOrigins({
+        doi: 'crossref',
+        title: data.title ? 'crossref' : 'manual',
+        authors: data.authors?.length ? 'crossref' : 'manual',
+        journal: data.journal ? 'crossref' : 'manual',
+        year: data.year ? 'crossref' : 'manual',
+        department: 'manual',
+      });
+      setDidFetch(true);
+      setFetchedMeta({
+        title: data.title || 'Not provided by Crossref',
+        authors: data.authors?.length ? formatAuthors(data.authors, 6) : 'Not provided by Crossref',
+        year: data.year ? String(data.year) : 'Not provided by Crossref',
+        journal: data.journal || 'Not provided by Crossref',
+      });
       setSource('CROSSREF');
+      setFetchStatus('success');
       setErrors((current) => ({ ...current, doi: undefined, title: undefined, authors: undefined, year: undefined }));
       const missing = [];
       if (!data.title) missing.push('title');
@@ -85,20 +218,79 @@ export default function SubmitPublication() {
           : 'Details filled from Crossref. Choose a department, then submit.'
       );
     } catch (error) {
-      toast.push('error', getErrorMessage(error, 'Crossref could not be reached. You can still enter the details.'));
+      const status = error?.response?.status;
+      if (status === 404) {
+        setFetchStatus('not_found');
+        toast.push('error', 'DOI not found');
+      } else if (!error?.response || status >= 500 || error?.code === 'ERR_NETWORK' || error?.code === 'ECONNABORTED') {
+        setFetchStatus('offline');
+        toast.push('error', 'Unable to connect to Crossref');
+      } else {
+        setFetchStatus('offline');
+        toast.push('error', getErrorMessage(error, 'Unable to connect to Crossref'));
+      }
     } finally {
       setFetching(false);
     }
   }
 
+  // Live duplicate detection: re-check the register shortly after the DOI or title changes.
+  const cleanedFormDoi = cleanDoi(form.doi);
+  const dupDoi = isValidDoi(cleanedFormDoi) ? cleanedFormDoi : '';
+  const dupTitle = form.title.trim();
+  useEffect(() => {
+    if (activeTab === 'orcid') return undefined;
+    if (!dupDoi && dupTitle.length < 4) {
+      dupRequestId.current++;
+      setDupCheck({ state: 'idle', exact: null, similar: [] });
+      return undefined;
+    }
+    const controller = new AbortController();
+    const requestId = ++dupRequestId.current;
+    setDupCheck((current) => ({ ...current, state: 'checking' }));
+    const timer = setTimeout(async () => {
+      try {
+        const result = await findDuplicateCandidates({ doi: dupDoi, title: dupTitle }, controller.signal);
+        if (requestId === dupRequestId.current) setDupCheck({ state: 'done', ...result });
+      } catch {
+        if (controller.signal.aborted) return;
+        if (requestId === dupRequestId.current) setDupCheck({ state: 'error', exact: null, similar: [] });
+      }
+    }, 600);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [dupDoi, dupTitle, activeTab]);
+
   async function onSubmit(event) {
     event.preventDefault();
+    setSubmitAttempted(true);
     const { errors: next, authors, doi } = validatePublicationFields(form);
-    setErrors(next);
-    if (Object.keys(next).length > 0) return;
+    setErrors({});
+    if (Object.keys(next).length > 0) {
+      toast.push('error', 'Please fix the highlighted fields before submitting.');
+      return;
+    }
 
     setSaving(true);
     try {
+      // Re-check right before saving so a stale result can never let a duplicate through.
+      const requestId = ++dupRequestId.current;
+      setDupCheck((current) => ({ ...current, state: 'checking' }));
+      let duplicates = null;
+      try {
+        duplicates = await findDuplicateCandidates({ doi, title: form.title });
+        if (requestId === dupRequestId.current) setDupCheck({ state: 'done', ...duplicates });
+      } catch {
+        // If the check cannot run, the backend still rejects duplicate DOIs (409).
+        if (requestId === dupRequestId.current) setDupCheck({ state: 'error', exact: null, similar: [] });
+      }
+      if (duplicates?.exact) {
+        toast.push('error', 'This publication already exists in the register. Submission was not sent.');
+        return;
+      }
+
       await createPublication({
         title: form.title.trim(),
         authors,
@@ -112,6 +304,14 @@ export default function SubmitPublication() {
       navigate('/publications');
     } catch (error) {
       const data = error?.response?.data;
+      if (error?.response?.status === 409) {
+        dupRequestId.current++;
+        setDupCheck({
+          state: 'done',
+          exact: { title: form.title.trim(), doi, matchedOn: 'doi' },
+          similar: [],
+        });
+      }
       if (data?.fieldErrors?.length) {
         const mapped = {};
         data.fieldErrors.forEach((item) => {
@@ -275,80 +475,249 @@ export default function SubmitPublication() {
 
   const selectedCount = orcidWorks.filter((item) => item.selected && !item.alreadyExists && !item.imported).length;
   const importableCount = orcidWorks.filter((item) => !item.alreadyExists && !item.imported).length;
+  const liveValidation = validatePublicationFields(form);
+  const doiEntered = Boolean(form.doi.trim());
+  const missingRequired = ['title', 'authors', 'year', 'department'].filter((field) => liveValidation.errors[field]);
+  const doiInvalid = Boolean(liveValidation.errors.doi);
+  const exactDuplicate = dupCheck.state === 'done' ? dupCheck.exact : null;
+  const similarMatches = dupCheck.state === 'done' && !exactDuplicate ? dupCheck.similar : [];
+  const readyToSubmit = missingRequired.length === 0 && !doiInvalid && !exactDuplicate;
+  const doiVerified = fetchStatus === 'success' && Boolean(fetchedMeta) && didFetch && fieldOrigins.doi === 'crossref';
+
+  // Inline errors appear once a field has been visited (or after a submit attempt).
+  function fieldError(field) {
+    if (errors[field]) return errors[field];
+    if (touched[field] || submitAttempted) return liveValidation.errors[field];
+    return undefined;
+  }
+
+  function describeRecord(row) {
+    const parts = [row.year, row.department].filter(Boolean).join(' · ');
+    return `“${row.title}”${parts ? ` (${parts})` : ''}`;
+  }
+
+  function renderDoiField(withFetch) {
+    const doiError = fieldError('doi');
+    return (
+      <label>
+        {withFetch ? 'DOI' : 'DOI (optional)'}
+        <div className={withFetch ? 'doi-input-row' : undefined}>
+          <input
+            value={form.doi}
+            onChange={(event) => {
+              const next = applyCleanedDoi(event.target.value);
+              update('doi', next);
+              setFetchStatus(null);
+              if (!didFetch) setSource('FORM');
+            }}
+            onBlur={(event) => {
+              markTouched('doi');
+              const cleaned = cleanDoi(event.target.value);
+              if (cleaned && cleaned !== form.doi) {
+                setForm((current) => ({ ...current, doi: cleaned }));
+              }
+            }}
+            onKeyDown={(event) => {
+              if (withFetch && event.key === 'Enter') {
+                event.preventDefault();
+                if (doiEntered && !fetching) handleDoiLookup();
+              }
+            }}
+            placeholder="10.1038/nature12373"
+            aria-invalid={Boolean(doiError)}
+          />
+          {withFetch && (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={handleDoiLookup}
+              disabled={fetching || !doiEntered}
+            >
+              {fetching ? 'Fetching metadata…' : 'Fetch from DOI'}
+            </button>
+          )}
+        </div>
+        <span className="hint">Paste a DOI or https://doi.org link.</span>
+        {originLabel('doi') && <span className="origin-tag">{originLabel('doi')}</span>}
+        {doiError && <span className="field-error">{doiError}</span>}
+      </label>
+    );
+  }
+
+  function renderDoiCheck() {
+    if (doiInvalid) {
+      return <CheckRow tone="error" title="DOI format is invalid" detail="Use a DOI such as 10.1038/nature12373 or a https://doi.org link." />;
+    }
+    if (dupDoi) {
+      return (
+        <CheckRow
+          tone="success"
+          title="DOI validated"
+          detail={doiVerified
+            ? 'Format checked and verified with Crossref.'
+            : activeTab === 'doi'
+              ? 'Format looks correct. Use “Fetch from DOI” to verify it with Crossref.'
+              : 'Format looks correct.'}
+        />
+      );
+    }
+    return activeTab === 'doi' ? (
+      <CheckRow tone="pending" title="No DOI entered" detail="Paste a DOI above and fetch its details, or switch to “Enter manually”." />
+    ) : (
+      <CheckRow tone="pending" title="No DOI provided" detail="A DOI is optional for manual entries." />
+    );
+  }
+
+  function renderDuplicateChecks() {
+    const rows = [];
+    if (dupCheck.state === 'idle') {
+      rows.push(
+        <CheckRow key="dup" tone="pending" title="Duplicate check" detail="Runs automatically once a title or DOI is entered." />
+      );
+    } else if (dupCheck.state === 'checking') {
+      rows.push(<CheckRow key="dup" tone="info" title="Checking for duplicates…" detail="Comparing DOI and title with existing records." />);
+    } else if (dupCheck.state === 'error') {
+      rows.push(
+        <CheckRow
+          key="dup"
+          tone="warning"
+          title="Duplicate check unavailable"
+          detail="The register could not be reached. Duplicate DOIs are still blocked when you submit."
+        />
+      );
+    } else if (exactDuplicate) {
+      rows.push(
+        <CheckRow
+          key="dup"
+          tone="error"
+          title="Exact duplicate found"
+          detail={`${describeRecord(exactDuplicate)} is already in the register (same ${exactDuplicate.matchedOn === 'doi' ? 'DOI' : 'title'}). It can’t be submitted again.`}
+        />
+      );
+    } else {
+      rows.push(
+        <CheckRow key="dup" tone="success" title="No exact duplicate found" detail="We checked DOI and publication title against existing records." />
+      );
+    }
+
+    if (similarMatches.length > 0) {
+      rows.push(
+        <CheckRow
+          key="similar"
+          tone="warning"
+          title={similarMatches.length === 1 ? 'Similar publication detected' : `${similarMatches.length} similar publications detected`}
+          detail={
+            <>
+              Make sure this isn’t the same work before submitting:
+              <ul className="similar-list">
+                {similarMatches.map((row) => (
+                  <li key={row.id}>
+                    {describeRecord(row)}
+                    {row.doi ? <span className="cell-sub"> DOI {row.doi}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </>
+          }
+        />
+      );
+    }
+    return rows;
+  }
 
   return (
     <div className={activeTab === 'orcid' ? 'submit-wide' : 'narrow'}>
       <p className="eyebrow">Register</p>
       <h1>Submit a publication</h1>
       <p className="lede">
-        Enter a record manually, fetch metadata from Crossref with a DOI, or import publicly available works from an ORCID profile.
+        Choose how you want to add a publication: fetch its details with a DOI, import works from an ORCID profile, or enter them yourself.
       </p>
 
       <div className="tab-bar" role="tablist" aria-label="Submission method">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'manual'}
-          className={activeTab === 'manual' ? 'tab-button active' : 'tab-button'}
-          onClick={() => switchTab('manual')}
-        >
-          Manual &amp; DOI Lookup
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'orcid'}
-          className={activeTab === 'orcid' ? 'tab-button active' : 'tab-button'}
-          onClick={() => switchTab('orcid')}
-        >
-          Import from ORCID
-        </button>
-      </div>
-
-      {activeTab === 'manual' ? (
-        <form className="form-card" onSubmit={onSubmit} noValidate>
-          <div className="doi-row">
-            <label>
-              DOI (optional — fetch metadata automatically)
-              <input
-                value={form.doi}
-                onChange={(event) => {
-                  update('doi', event.target.value);
-                  setSource('FORM');
-                }}
-                placeholder="10.1038/nature12373 or https://doi.org/..."
-                aria-invalid={Boolean(errors.doi)}
-              />
-              {errors.doi && <span className="field-error">{errors.doi}</span>}
-            </label>
-            <button type="button" className="button button-secondary" onClick={handleDoiLookup} disabled={fetching}>
-              {fetching ? 'Fetching…' : 'Fetch from DOI'}
+        {MODES.map((mode) => {
+          const Icon = mode.icon;
+          const selected = activeTab === mode.id;
+          return (
+            <button
+              key={mode.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              className={selected ? 'tab-button active' : 'tab-button'}
+              onClick={() => switchTab(mode.id)}
+            >
+              <Icon size={16} strokeWidth={1.8} aria-hidden="true" />
+              {mode.label}
             </button>
-          </div>
+          );
+        })}
+      </div>
+      <p className="mode-description">{activeMode.description}</p>
+
+      {activeTab !== 'orcid' ? (
+        <form className="form-card" onSubmit={onSubmit} noValidate>
+          {activeTab === 'doi' && renderDoiField(true)}
+
+          {activeTab === 'doi' && fetchStatus === 'loading' && (
+            <StatusCard tone="info" title="Fetching metadata…">
+              <span className="status-card-kicker">Looking up this DOI on Crossref.</span>
+            </StatusCard>
+          )}
+          {activeTab === 'doi' && fetchStatus === 'not_found' && (
+            <StatusCard tone="error" title="DOI not found">
+              <span className="status-card-kicker">No Crossref record matched this DOI. You can still enter details manually.</span>
+            </StatusCard>
+          )}
+          {activeTab === 'doi' && fetchStatus === 'offline' && (
+            <StatusCard tone="error" title="Unable to connect to Crossref">
+              <span className="status-card-kicker">Check your connection, then try again or enter the details by hand.</span>
+            </StatusCard>
+          )}
+          {activeTab === 'doi' && fetchStatus === 'invalid' && (
+            <StatusCard tone="error" title="DOI format is invalid">
+              <span className="status-card-kicker">Use a DOI such as 10.1038/nature12373 or a https://doi.org link.</span>
+            </StatusCard>
+          )}
+          {activeTab === 'doi' && fetchStatus === 'success' && fetchedMeta && (
+            <StatusCard tone="success" title="Metadata fetched successfully">
+              <span className="status-card-kicker">Source: Crossref · DOI verified</span>
+              <div className="status-card-meta">
+                <div><strong>Title:</strong> {fetchedMeta.title}</div>
+                <div><strong>Authors:</strong> {fetchedMeta.authors}</div>
+                <div><strong>Year:</strong> {fetchedMeta.year}</div>
+                <div><strong>Journal:</strong> {fetchedMeta.journal}</div>
+              </div>
+            </StatusCard>
+          )}
+
           <label>
-            Title
+            Title*
             <input
               value={form.title}
               onChange={(event) => update('title', event.target.value)}
-              aria-invalid={Boolean(errors.title)}
+              onBlur={() => markTouched('title')}
+              aria-invalid={Boolean(fieldError('title'))}
               maxLength={500}
             />
-            {errors.title && <span className="field-error">{errors.title}</span>}
+            {originLabel('title') && <span className="origin-tag">{originLabel('title')}</span>}
+            {fieldError('title') && <span className="field-error">{fieldError('title')}</span>}
           </label>
           <label>
-            Authors
+            Authors*
             <input
               value={form.authors}
               onChange={(event) => update('authors', event.target.value)}
+              onBlur={() => markTouched('authors')}
               placeholder="Separate names with commas"
-              aria-invalid={Boolean(errors.authors)}
+              aria-invalid={Boolean(fieldError('authors'))}
             />
             <span className="hint">Example: Ada Lovelace, Alan Turing</span>
-            {errors.authors && <span className="field-error">{errors.authors}</span>}
+            {originLabel('authors') && <span className="origin-tag">{originLabel('authors')}</span>}
+            {fieldError('authors') && <span className="field-error">{fieldError('authors')}</span>}
           </label>
           <div className="split">
             <label>
-              Year
+              Publication Year*
               <input
                 type="number"
                 min="1900"
@@ -356,33 +725,64 @@ export default function SubmitPublication() {
                 step="1"
                 value={form.year}
                 onChange={(event) => update('year', event.target.value)}
-                aria-invalid={Boolean(errors.year)}
+                onBlur={() => markTouched('year')}
+                aria-invalid={Boolean(fieldError('year'))}
               />
-              {errors.year && <span className="field-error">{errors.year}</span>}
+              {originLabel('year') && <span className="origin-tag">{originLabel('year')}</span>}
+              {fieldError('year') && <span className="field-error">{fieldError('year')}</span>}
             </label>
             <label>
-              Department
-              <select
+              Department*
+              <Select
                 value={form.department}
-                onChange={(event) => update('department', event.target.value)}
-                aria-invalid={Boolean(errors.department)}
-              >
-                <option value="">Select a department</option>
-                {DEPARTMENTS.map((department) => (
-                  <option key={department} value={department}>{department}</option>
-                ))}
-              </select>
-              {errors.department && <span className="field-error">{errors.department}</span>}
+                onChange={(next) => {
+                  update('department', next);
+                  markTouched('department');
+                }}
+                onBlur={() => markTouched('department')}
+                aria-invalid={Boolean(fieldError('department'))}
+                placeholder="Select a department"
+                options={DEPARTMENT_OPTIONS}
+              />
+              {originLabel('department') && <span className="origin-tag">{originLabel('department')}</span>}
+              {fieldError('department') && <span className="field-error">{fieldError('department')}</span>}
             </label>
           </div>
           <label>
-            Journal
+            Journal / Conference
             <input
               value={form.journal}
               onChange={(event) => update('journal', event.target.value)}
               maxLength={300}
             />
+            {originLabel('journal') && <span className="origin-tag">{originLabel('journal')}</span>}
           </label>
+
+          {activeTab === 'manual' && renderDoiField(false)}
+
+          <section className="checks-panel" aria-label="Submission checks" aria-live="polite">
+            {readyToSubmit ? (
+              <StatusCard tone="success" title="Ready to submit">
+                <span className="status-card-kicker">All required fields are complete.</span>
+              </StatusCard>
+            ) : (
+              <p className="checks-heading">Submission checks</p>
+            )}
+            <ul className="check-list">
+              {renderDoiCheck()}
+              {missingRequired.length === 0 ? (
+                <CheckRow tone="success" title="Required information completed" detail="Title, authors, year and department are filled in." />
+              ) : (
+                <CheckRow
+                  tone={submitAttempted ? 'error' : 'pending'}
+                  title="Required information incomplete"
+                  detail={`Still needed: ${missingRequired.map((field) => FIELD_LABELS[field]).join(', ')}.`}
+                />
+              )}
+              {renderDuplicateChecks()}
+            </ul>
+          </section>
+
           <div className="form-actions">
             <button type="submit" className="button button-primary" disabled={saving}>
               {saving ? 'Saving…' : 'Submit publication'}
@@ -448,15 +848,12 @@ export default function SubmitPublication() {
               <div className="orcid-toolbar">
                 <label>
                   Default department for import
-                  <select
+                  <Select
                     value={batchDepartment}
-                    onChange={(event) => applyBatchDepartment(event.target.value)}
-                  >
-                    <option value="">Select a department</option>
-                    {DEPARTMENTS.map((department) => (
-                      <option key={department} value={department}>{department}</option>
-                    ))}
-                  </select>
+                    onChange={applyBatchDepartment}
+                    placeholder="Select a department"
+                    options={DEPARTMENT_OPTIONS}
+                  />
                 </label>
                 <div className="orcid-toolbar-actions">
                   <button
@@ -465,7 +862,7 @@ export default function SubmitPublication() {
                     disabled={importableCount === 0 || importing}
                     onClick={() => selectAllImportable(selectedCount < importableCount)}
                   >
-                    {selectedCount < importableCount ? 'Select all new' : 'Deselect all'}
+                    {importableCount === 0 || selectedCount < importableCount ? 'Select all new' : 'Deselect all'}
                   </button>
                   <button
                     type="button"
@@ -540,16 +937,13 @@ export default function SubmitPublication() {
                           </label>
                           <label>
                             Department
-                            <select
+                            <Select
                               value={item.department}
                               disabled={disabled || importing}
-                              onChange={(event) => updateOrcidWork(item.key, { department: event.target.value })}
-                            >
-                              <option value="">Select department</option>
-                              {DEPARTMENTS.map((department) => (
-                                <option key={department} value={department}>{department}</option>
-                              ))}
-                            </select>
+                              onChange={(next) => updateOrcidWork(item.key, { department: next })}
+                              placeholder="Select department"
+                              options={DEPARTMENT_OPTIONS}
+                            />
                           </label>
                         </div>
                         {item.rowError && <p className="field-error">{item.rowError}</p>}

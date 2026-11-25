@@ -5,16 +5,17 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import { CalendarRange, GraduationCap, Library, Users } from 'lucide-react';
-import { DEPARTMENTS, fetchDashboardData, fetchFilterOptions, getErrorMessage } from '../services/publicationApi';
+import Select from '../components/Select';
+import { DEPARTMENTS, fetchDashboardData, fetchFilterOptions, formatAuthors, getErrorMessage } from '../services/publicationApi';
 
-const CHART_PALETTE = ['#1F3A4D', '#7A9E8E', '#C9A961', '#6F8FAF', '#B98B73'];
+const CHART_COLOR = '#1F3A4D';
+const CHART_FILL = '#7A9E8E';
+const AXIS_TICK = { fill: '#5B6770', fontSize: 12 };
 
 const tooltipStyle = {
   background: '#ffffff',
@@ -42,7 +43,6 @@ export default function Dashboard() {
   const [faculty, setFaculty] = useState('');
   const [fromYear, setFromYear] = useState('');
   const [toYear, setToYear] = useState('');
-  const [sectionsOpen, setSectionsOpen] = useState(false);
   const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -117,40 +117,40 @@ export default function Dashboard() {
       <div className="filter-bar dash-filters" id="overview">
         <label>
           <span>Department</span>
-          <select value={department} onChange={(event) => setDepartment(event.target.value)}>
-            <option value="">All departments</option>
-            {filterOptions.departments.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
+          <Select
+            value={department}
+            onChange={setDepartment}
+            options={[{ value: '', label: 'All departments' }, ...filterOptions.departments.map((item) => ({ value: item, label: item }))]}
+          />
         </label>
         <label>
           <span>Faculty</span>
-          <select value={faculty} onChange={(event) => setFaculty(event.target.value)}>
-            <option value="">All faculty</option>
-            {filterOptions.faculties.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
+          <Select
+            value={faculty}
+            onChange={setFaculty}
+            options={[{ value: '', label: 'All faculty' }, ...filterOptions.faculties.map((item) => ({ value: item, label: item }))]}
+          />
         </label>
         <label>
           <span>From year</span>
-          <select value={fromYear} onChange={(event) => setFromYear(event.target.value)}>
-            <option value="">Any</option>
-            {[...filterOptions.years].sort((a, b) => a - b).map((item) => (
-              <option key={item} value={String(item)}>{item}</option>
-            ))}
-          </select>
+          <Select
+            value={fromYear}
+            onChange={setFromYear}
+            options={[{ value: '', label: 'Any' }, ...[...filterOptions.years].sort((a, b) => a - b).map((item) => ({ value: String(item), label: String(item) }))]}
+          />
         </label>
         <label>
           <span>To year</span>
-          <select value={toYear} onChange={(event) => setToYear(event.target.value)}>
-            <option value="">Any</option>
-            {filterOptions.years.map((item) => (
-              <option key={item} value={String(item)}>{item}</option>
-            ))}
-          </select>
+          <Select
+            value={toYear}
+            onChange={setToYear}
+            options={[{ value: '', label: 'Any' }, ...filterOptions.years.map((item) => ({ value: String(item), label: String(item) }))]}
+          />
         </label>
         <div className="filter-reset">
           <button
             type="button"
-            className="button button-secondary"
+            className="button button-ghost"
             disabled={!hasFilters}
             onClick={() => {
               setDepartment('');
@@ -159,31 +159,12 @@ export default function Dashboard() {
               setToYear('');
             }}
           >
-            Reset
+            Clear filters
           </button>
         </div>
       </div>
 
-      <div className="dash-shell">
-        <aside className={sectionsOpen ? 'dash-side open' : 'dash-side'}>
-          <button
-            type="button"
-            className="side-toggle"
-            aria-expanded={sectionsOpen}
-            onClick={() => setSectionsOpen((open) => !open)}
-          >
-            Sections
-          </button>
-          <nav aria-label="Dashboard sections">
-            <a href="#overview">Overview</a>
-            <a href="#by-department">By department</a>
-            <a href="#by-year">By year</a>
-            <a href="#by-faculty">Faculty</a>
-            <a href="#recent">Recent</a>
-          </nav>
-        </aside>
-
-        <div className="dash-main">
+      <div className="dash-main">
           {error && (
             <div className="banner banner-error" role="alert">
               <p>{error}</p>
@@ -197,11 +178,11 @@ export default function Dashboard() {
             <DashboardSkeleton />
           ) : summary ? (
             <>
-              <section className="kpi-row" aria-label="Summary" aria-busy={loading}>
-                <Kpi icon={Library} value={summary?.totalPublications ?? 0} label="Total publications" />
-                <Kpi icon={GraduationCap} value={summary?.departments ?? 0} label="Departments" />
-                <Kpi icon={Users} value={summary?.authors ?? 0} label="Authors" />
-                <Kpi icon={CalendarRange} value={summary?.thisYear ?? 0} label={`This year (${new Date().getFullYear()})`} />
+              <section className="stat-strip" aria-label="Summary" aria-busy={loading}>
+                <Stat value={summary?.totalPublications ?? 0} label="Verified publications" />
+                <Stat value={summary?.departments ?? 0} label="Departments" />
+                <Stat value={summary?.authors ?? 0} label="Authors" />
+                <Stat value={summary?.thisYear ?? 0} label={`Published in ${new Date().getFullYear()}`} />
               </section>
 
               {empty ? (
@@ -217,15 +198,11 @@ export default function Dashboard() {
                       <ChartFrame empty={departments.length === 0} emptyText="No departments in this range.">
                         <ResponsiveContainer width="100%" height={300}>
                           <BarChart data={departments} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
-                            <CartesianGrid stroke="#E4E0D6" vertical={false} />
-                            <XAxis dataKey="department" interval={0} angle={-28} textAnchor="end" height={78} tick={{ fill: '#5B6770', fontSize: 12 }} />
-                            <YAxis allowDecimals={false} width={32} tick={{ fill: '#5B6770', fontSize: 12 }} />
+                            <CartesianGrid stroke="#ECE8DF" vertical={false} />
+                            <XAxis dataKey="department" interval={0} angle={-28} textAnchor="end" height={78} tick={AXIS_TICK} />
+                            <YAxis allowDecimals={false} width={32} tick={AXIS_TICK} />
                             <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(31, 58, 77, 0.04)' }} />
-                            <Bar dataKey="count" name="Publications" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={animate} animationDuration={400}>
-                              {departments.map((entry, index) => (
-                                <Cell key={entry.department} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
-                              ))}
-                            </Bar>
+                            <Bar dataKey="count" name="Publications" fill={CHART_COLOR} radius={[4, 4, 0, 0]} maxBarSize={40} isAnimationActive={animate} animationDuration={400} />
                           </BarChart>
                         </ResponsiveContainer>
                       </ChartFrame>
@@ -236,17 +213,17 @@ export default function Dashboard() {
                       <ChartFrame empty={years.length === 0} emptyText="No years in this range.">
                         <ResponsiveContainer width="100%" height={300}>
                           <AreaChart data={years} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                            <CartesianGrid stroke="#E4E0D6" vertical={false} />
-                            <XAxis dataKey="year" tick={{ fill: '#5B6770', fontSize: 12 }} />
-                            <YAxis allowDecimals={false} width={32} tick={{ fill: '#5B6770', fontSize: 12 }} />
+                            <CartesianGrid stroke="#ECE8DF" vertical={false} />
+                            <XAxis dataKey="year" tick={AXIS_TICK} />
+                            <YAxis allowDecimals={false} width={32} tick={AXIS_TICK} />
                             <Tooltip contentStyle={tooltipStyle} />
                             <Area
                               type="monotone"
                               dataKey="count"
                               name="Publications"
-                              stroke="#1F3A4D"
-                              fill="#7A9E8E"
-                              fillOpacity={0.28}
+                              stroke={CHART_COLOR}
+                              fill={CHART_FILL}
+                              fillOpacity={0.22}
                               strokeWidth={2}
                               isAnimationActive={animate}
                               animationDuration={400}
@@ -264,11 +241,11 @@ export default function Dashboard() {
                       <ChartFrame empty={facultyCounts.length === 0} emptyText="No faculty in this range." height={Math.max(220, facultyCounts.length * 36)}>
                         <ResponsiveContainer width="100%" height={Math.max(220, facultyCounts.length * 36)}>
                           <BarChart data={facultyCounts} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
-                            <CartesianGrid stroke="#E4E0D6" horizontal={false} />
-                            <XAxis type="number" allowDecimals={false} tick={{ fill: '#5B6770', fontSize: 12 }} />
+                            <CartesianGrid stroke="#ECE8DF" horizontal={false} />
+                            <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} />
                             <YAxis type="category" dataKey="faculty" width={148} tick={{ fill: '#2B2F33', fontSize: 12 }} />
                             <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(31, 58, 77, 0.04)' }} />
-                            <Bar dataKey="count" name="Publications" fill="#6F8FAF" radius={[0, 4, 4, 0]} maxBarSize={16} isAnimationActive={animate} animationDuration={400} />
+                            <Bar dataKey="count" name="Publications" fill={CHART_COLOR} radius={[0, 4, 4, 0]} maxBarSize={16} isAnimationActive={animate} animationDuration={400} />
                           </BarChart>
                         </ResponsiveContainer>
                       </ChartFrame>
@@ -284,10 +261,9 @@ export default function Dashboard() {
                             <li key={item.id}>
                               <div>
                                 <h3>{item.title}</h3>
-                                <p>{item.authors.join(', ')}</p>
-                                <p className="cell-sub">{item.journal || 'Journal not recorded'} · {item.year}</p>
+                                <p title={item.authors.length > 4 ? `${item.authors.length.toLocaleString()} authors` : undefined}>{formatAuthors(item.authors)}</p>
+                                <p className="cell-sub">{[item.journal || 'Journal not recorded', item.year, item.department].filter(Boolean).join(' · ')}</p>
                               </div>
-                              <span className="tag">{item.department}</span>
                             </li>
                           ))}
                         </ul>
@@ -298,19 +274,17 @@ export default function Dashboard() {
               )}
             </>
           ) : null}
-        </div>
       </div>
     </div>
   );
 }
 
-function Kpi({ icon: Icon, value, label }) {
+function Stat({ value, label }) {
   return (
-    <article className="kpi">
-      <Icon size={18} strokeWidth={1.5} aria-hidden="true" />
-      <p className="kpi-value">{value}</p>
-      <p className="kpi-label">{label}</p>
-    </article>
+    <div className="stat">
+      <p className="stat-value">{value}</p>
+      <p className="stat-label">{label}</p>
+    </div>
   );
 }
 
@@ -322,12 +296,7 @@ function ChartFrame({ empty, emptyText, children }) {
 function DashboardSkeleton() {
   return (
     <div aria-hidden="true">
-      <div className="kpi-row">
-        <div className="skeleton kpi-skeleton" />
-        <div className="skeleton kpi-skeleton" />
-        <div className="skeleton kpi-skeleton" />
-        <div className="skeleton kpi-skeleton" />
-      </div>
+      <div className="skeleton stat-strip-skeleton" />
       <div className="chart-grid">
         <div className="skeleton chart-skeleton" />
         <div className="skeleton chart-skeleton" />
