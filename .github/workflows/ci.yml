@@ -32,9 +32,8 @@ jobs:
       - name: Run repository security hygiene scan
         run: bash scripts/security-scan.sh
 
-      - name: Update Trivy vulnerability DB
-        run: |
-          trivy image --download-db-only || trivy db update
+
+
       - name: Run Trivy filesystem vulnerability and misconfiguration scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
