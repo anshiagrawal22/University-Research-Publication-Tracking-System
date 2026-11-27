@@ -84,8 +84,8 @@ pipeline {
             steps {
                 sh """
                     if command -v trivy > /dev/null 2>&1; then
-                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${BACKEND_IMAGE}:${BUILD_NUMBER}
-                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+                        trivy image --timeout 15m --exit-code 1 --severity CRITICAL --ignore-unfixed ${BACKEND_IMAGE}:${BUILD_NUMBER}
+                        trivy image --timeout 15m --exit-code 1 --severity CRITICAL --ignore-unfixed ${FRONTEND_IMAGE}:${BUILD_NUMBER}
                     else
                         echo "WARNING: Trivy CLI not installed on Jenkins agent; image scan skipped."
                     fi
